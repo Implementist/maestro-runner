@@ -328,9 +328,11 @@ func (c *Client) FindElements(strategy, value string) ([]string, error) {
 	return ids, nil
 }
 
-// GetActiveElement returns the currently focused element.
+// GetActiveElement returns the currently focused element. W3C defines this as
+// GET; the UiAutomator2 server and Appium 3 core route only GET, so a POST
+// 404'd and every caller fell back as if nothing were focused.
 func (c *Client) GetActiveElement() (string, error) {
-	resp, err := c.post(c.sessionPath()+"/element/active", nil)
+	resp, err := c.get(c.sessionPath() + "/element/active")
 	if err != nil {
 		return "", err
 	}
