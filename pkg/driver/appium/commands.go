@@ -662,14 +662,29 @@ func (d *Driver) eraseText(step *flow.EraseTextStep) *core.CommandResult {
 	}
 	// GetActiveElement failed, fall through to delete key approach
 
-	// Fallback: Press delete key multiple times
-	// This is slower (N HTTP calls) but works in edge cases:
-	// - Can't find focused element
-	// - Element doesn't support Clear() or Text()
-	// - Password fields that don't expose text
-	// - Custom input components
+	// Fallback: delete keys, one per character. This is slower but works in
+	// the edge cases above (no readable text, no Clear, custom inputs).
+	if d.platform == "ios" {
+		// XCUITest has no press_keycode route, so the Android key code 404'd
+		// on every iteration and the step still reported success. WDA types
+		// "\b" as the delete key, as the WDA driver does.
+		deletes := strings.Repeat("\b", chars)
+		var err error
+		if activeElemID != "" {
+			err = d.client.ElementSendKeys(activeElemID, deletes)
+		} else {
+			err = d.client.SendKeys(deletes)
+		}
+		if err != nil {
+			return errorResult(err, "eraseText: could not send delete keys")
+		}
+		return successResult(fmt.Sprintf("Erased %d characters", chars), nil)
+	}
 	for i := 0; i < chars; i++ {
 		if err := d.client.PressKeyCode(67); err != nil { // Android KEYCODE_DEL
+			if i == 0 {
+				return errorResult(err, "eraseText: could not press delete")
+			}
 			logger.Warn("failed to press delete key on iteration %d: %v", i, err)
 		}
 	}
