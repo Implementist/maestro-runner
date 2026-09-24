@@ -1232,6 +1232,21 @@ func (d *Driver) takeScreenshot(step *flow.TakeScreenshotStep) *core.CommandResu
 		return errorResult(err, fmt.Sprintf("Failed to take screenshot: %v", err))
 	}
 
+	// cropOn keeps only the element, as the other drivers do. Ignoring it made
+	// assertScreenshot compare the whole screen against a cropped baseline.
+	if step.CropOn != nil {
+		info, findErr := d.findElement(*step.CropOn, 0)
+		if findErr != nil || info == nil {
+			return errorResult(findErr, fmt.Sprintf("cropOn: element not found: %v", findErr))
+		}
+		sw, sh := d.client.ScreenSize()
+		cropped, cropErr := core.CropScreenshot(data, info.Bounds, sw, sh)
+		if cropErr != nil {
+			return errorResult(cropErr, fmt.Sprintf("cropOn: %v", cropErr))
+		}
+		data = cropped
+	}
+
 	return &core.CommandResult{
 		Success: true,
 		Message: "Screenshot captured",
