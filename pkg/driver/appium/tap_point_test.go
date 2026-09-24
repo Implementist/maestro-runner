@@ -115,3 +115,30 @@ func TestTapOnPointLongPressIsRelativeToTheElement(t *testing.T) {
 		t.Errorf("pressed (%v,%v), want (972,747)", x, y)
 	}
 }
+
+// scroll left/right swipe horizontally across the middle of the screen; they
+// used to be rejected, so horizontal carousels could not be scrolled.
+func TestScrollLeftRightSwipesHorizontally(t *testing.T) {
+	for dir, want := range map[string][4]float64{
+		"right": {720, 1170, 360, 1170}, // content from the right: finger right → left
+		"left":  {360, 1170, 720, 1170},
+		"down":  {540, 1560, 540, 780},
+	} {
+		d, body, _ := rowServer(t, "android")
+		if res := d.scroll(&flow.ScrollStep{Direction: dir}); !res.Success {
+			t.Fatalf("%s: %s", dir, res.Message)
+		}
+		acts := capturedActions(t, *body)
+		var last map[string]interface{}
+		for _, a := range acts {
+			if a["type"] == "pointerMove" {
+				last = a
+			}
+		}
+		first := acts[0]
+		got := [4]float64{first["x"].(float64), first["y"].(float64), last["x"].(float64), last["y"].(float64)}
+		if got != want {
+			t.Errorf("%s: swipe %v, want %v", dir, got, want)
+		}
+	}
+}

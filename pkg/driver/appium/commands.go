@@ -290,23 +290,29 @@ func (d *Driver) scroll(step *flow.ScrollStep) *core.CommandResult {
 		direction = "down"
 	}
 
+	// The direction is where the content comes from: scroll down reveals what
+	// is below, so the finger swipes up; scroll right reveals what is to the
+	// right, so it swipes right to left (as the WDA and uiautomator2 drivers).
 	w, h := d.client.ScreenSize()
-	centerX := w / 2
-	var startY, endY int
+	centerX, centerY := w/2, h/2
+	startX, endX := centerX, centerX
+	startY, endY := centerY, centerY
 
 	switch direction {
 	case "down":
-		startY = h * 2 / 3
-		endY = h / 3
+		startY, endY = h*2/3, h/3
 	case "up":
-		startY = h / 3
-		endY = h * 2 / 3
+		startY, endY = h/3, h*2/3
+	case "right":
+		startX, endX = w*2/3, w/3
+	case "left":
+		startX, endX = w/3, w*2/3
 	default:
 		return errorResult(fmt.Errorf("invalid scroll direction: %s", direction), "")
 	}
 
 	// Was hardcoded 500ms, so `speed:` was parsed and dropped (#165).
-	if err := d.client.Swipe(centerX, startY, centerX, endY, core.ScrollDurationOrDefault(step.Speed, 500)); err != nil {
+	if err := d.client.Swipe(startX, startY, endX, endY, core.ScrollDurationOrDefault(step.Speed, 500)); err != nil {
 		return errorResult(err, "Failed to scroll")
 	}
 
@@ -427,8 +433,11 @@ func (d *Driver) scrollUntilVisible(step *flow.ScrollUntilVisibleStep) *core.Com
 			return errorResult(fmt.Errorf("element not found after scrolling"), reason)
 		}
 
-		// Scroll
-		d.scroll(&flow.ScrollStep{Direction: direction, Speed: step.Speed})
+		// Scroll. A failed scroll ends the step with its reason; ignoring it
+		// used to turn an unsupported direction into "no progress".
+		if res := d.scroll(&flow.ScrollStep{Direction: direction, Speed: step.Speed}); !res.Success {
+			return res
+		}
 		time.Sleep(300 * time.Millisecond)
 	}
 
