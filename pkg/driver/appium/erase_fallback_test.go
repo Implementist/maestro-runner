@@ -52,3 +52,23 @@ func TestEraseTextIOSFallbackSendsDeleteCharacters(t *testing.T) {
 		t.Errorf("value body = %s, want three \\b characters", valueBody)
 	}
 }
+
+// After tapping one field and then a second one that resolves through page
+// source (no element id), inputText on iOS must not type into the first
+// field: the remembered id is cleared by every step that can move focus.
+func TestIOSInputTextForgetsAnEarlierTappedField(t *testing.T) {
+	d := createTestAppiumDriver(httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]interface{}{"value": nil})
+	})))
+	d.platform = "ios"
+	d.lastTappedElementID = "first-field"
+	d.forgetTappedElementUnlessTyping(&flow.TapOnPointStep{})
+	if d.lastTappedElementID != "" {
+		t.Errorf("a tap kept %q; inputText would re-focus that field", d.lastTappedElementID)
+	}
+	d.lastTappedElementID = "field"
+	d.forgetTappedElementUnlessTyping(&flow.InputTextStep{})
+	if d.lastTappedElementID != "field" {
+		t.Error("inputText itself must keep the tapped element")
+	}
+}

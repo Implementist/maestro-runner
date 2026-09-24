@@ -110,6 +110,22 @@ func (d *Driver) RestartSession() error {
 	return nil
 }
 
+// forgetTappedElementUnlessTyping clears the element the last tapOn resolved,
+// for every step that can move focus. inputText on iOS types into that element
+// by id and WDA re-focuses it, so a stale id sent text into a field the flow
+// had already left (or failed once it was gone). Text entry and read-only
+// steps keep it; tapOn sets it again when it resolves a native element.
+func (d *Driver) forgetTappedElementUnlessTyping(step flow.Step) {
+	switch step.(type) {
+	case *flow.InputTextStep, *flow.InputRandomStep, *flow.EraseTextStep, *flow.PasteTextStep,
+		*flow.CopyTextFromStep, *flow.AssertVisibleStep, *flow.AssertNotVisibleStep,
+		*flow.WaitUntilStep, *flow.TakeScreenshotStep, *flow.AssertScreenshotStep,
+		*flow.WaitForAnimationToEndStep, *flow.WaitStep:
+		return
+	}
+	d.lastTappedElementID = ""
+}
+
 // deepCopyCaps returns a deep copy of a capabilities map via JSON round-trip.
 func deepCopyCaps(caps map[string]interface{}) map[string]interface{} {
 	if caps == nil {
@@ -143,6 +159,7 @@ func (d *Driver) Execute(step flow.Step) *core.CommandResult {
 }
 
 func (d *Driver) executeStep(step flow.Step) *core.CommandResult {
+	d.forgetTappedElementUnlessTyping(step)
 	switch s := step.(type) {
 	case *flow.TapOnStep:
 		return d.tapOn(s)
