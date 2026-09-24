@@ -142,3 +142,16 @@ func TestScrollLeftRightSwipesHorizontally(t *testing.T) {
 		}
 	}
 }
+
+// dragAndDrop's `point:` next to a selector is relative to the element, like
+// tapOn's; it used to start at the element's centre.
+func TestDragFromPointInsideTheElement(t *testing.T) {
+	d, _, _ := rowServer(t, "android")
+	x, y, _, err := d.resolveDragPoint(flow.Selector{ID: "alarm_row", Point: "90%,50%"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x != 972 || y != 747 {
+		t.Errorf("drag point (%d,%d), want (972,747)", x, y)
+	}
+}

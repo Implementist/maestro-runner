@@ -332,7 +332,12 @@ func (d *Driver) resolveDragPoint(sel flow.Selector, timeout time.Duration) (int
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("element not found: %s: %w", sel.Describe(), err)
 	}
-	x, y := info.Bounds.Center()
+	// With a selector, point is relative to the element, as for tapOn (#175)
+	// and in the other drivers; the centre is the default.
+	x, y, perr := core.PointInBounds(sel.Point, info.Bounds)
+	if perr != nil {
+		return 0, 0, nil, fmt.Errorf("invalid point %q: %w", sel.Point, perr)
+	}
 	return x, y, info, nil
 }
 
