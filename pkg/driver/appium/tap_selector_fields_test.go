@@ -60,3 +60,28 @@ func TestTapOnTextWithIDOrStateMatchesAllFields(t *testing.T) {
 		})
 	}
 }
+
+// A literal id tries the exact id before any id containing it: the substring
+// query answers with the first match in tree order, which could be a longer
+// id ("login_hint") ahead of the one asked for ("login").
+func TestLiteralIDTriesExactBeforeSubstring(t *testing.T) {
+	var order []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/element") && r.Method == http.MethodPost {
+			b, _ := io.ReadAll(r.Body)
+			order = append(order, string(b))
+			writeJSON(w, map[string]interface{}{"value": map[string]interface{}{w3cElementKey: "e"}})
+			return
+		}
+		writeJSON(w, map[string]interface{}{"value": map[string]interface{}{"x": 0, "y": 0, "width": 10, "height": 10}})
+	}))
+	t.Cleanup(server.Close)
+	d := createTestAppiumDriver(server)
+	if _, err := d.findElementDirect(flow.Selector{ID: "login"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(order) == 0 || !strings.Contains(order[0], `"using":"id"`) {
+		t.Errorf("first query = %v, want the exact id strategy", order)
+	}
+}

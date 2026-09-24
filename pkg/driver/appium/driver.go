@@ -431,14 +431,17 @@ func (d *Driver) findElementDirect(sel flow.Selector) (*core.ElementInfo, error)
 				// Regex ID: use page source (Appium's UiAutomator calls are slow when element absent)
 				return d.findElementByPageSource(sel)
 			}
-			// Literal ID: use UiAutomator for fast lookup
+			// Literal ID: the exact id first, then any id containing it. The
+			// substring query used to go first, and the server answers with the
+			// first match in tree order, so `id: login` could hit "login_hint"
+			// before "login". The id strategy prefixes the app package itself
+			// when the id has none. Same order as the uiautomator2 driver.
+			if elemID, err := d.client.FindElement("id", sel.ID); err == nil && elemID != "" {
+				return d.getElementInfo(elemID)
+			}
 			escaped := escapeUIAutomatorString(sel.ID)
 			uiSelector := fmt.Sprintf(`new UiSelector().resourceIdMatches(".*%s.*")`, escaped)
 			if elemID, err := d.client.FindElement("-android uiautomator", uiSelector); err == nil && elemID != "" {
-				return d.getElementInfo(elemID)
-			}
-			// Fallback to standard id strategy
-			if elemID, err := d.client.FindElement("id", sel.ID); err == nil {
 				return d.getElementInfo(elemID)
 			}
 		}
