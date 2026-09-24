@@ -884,12 +884,13 @@ func (d *Driver) launchApp(step *flow.LaunchAppStep) *core.CommandResult {
 		if err := d.client.ClearAppData(appID); err != nil {
 			return errorResult(err, fmt.Sprintf("Failed to clear app state: %s", appID))
 		}
+	}
 
-		// Grant permissions after clearing state (pm clear resets permissions).
-		// Use flow-specified permissions if provided, otherwise grant all.
-		if d.client.Platform() == "android" {
-			d.grantPermissions(appID, step.Permissions)
-		}
+	// Apply permissions on every launch, as Maestro does (default all:allow)
+	// and the uiautomator2 driver does. They used to be applied only with
+	// clearState, so a flow's `permissions:` did nothing on a plain launch.
+	if d.client.Platform() == "android" {
+		d.grantPermissions(appID, step.Permissions)
 	}
 
 	if err := d.client.LaunchApp(appID); err != nil {
@@ -1288,13 +1289,12 @@ func parsePercentageCoords(coord string) (float64, float64, error) {
 // permissions during install, and avoid using this step explicitly.
 func (d *Driver) grantPermissions(appID string, permissions map[string]string) {
 	if len(permissions) > 0 {
-		for perm := range permissions {
-			if _, err := d.client.ExecuteMobile("shell", map[string]interface{}{
-				"command": "pm",
-				"args":    []string{"grant", appID, perm},
-			}); err != nil {
-				logger.Warn("failed to grant permission %s to %s: %v", perm, appID, err)
-			}
+		// Same mapping as the setPermissions step: shortcuts (camera,
+		// location, …) expand to their Android names and deny revokes. The
+		// raw key used to go straight to `pm grant`, so a deny was granted and
+		// shortcuts named no real permission.
+		if res := d.setPermissions(&flow.SetPermissionsStep{AppID: appID, Permissions: permissions}); !res.Success {
+			logger.Warn("launchApp permissions for %s: %s", appID, res.Message)
 		}
 		return
 	}
