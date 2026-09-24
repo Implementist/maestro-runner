@@ -85,3 +85,25 @@ func TestLiteralIDTriesExactBeforeSubstring(t *testing.T) {
 		t.Errorf("first query = %v, want the exact id strategy", order)
 	}
 }
+
+// pressKey on Android accepts the uiautomator2 driver's keys, and delete is
+// backspace (67), not forward-delete (112).
+func TestPressKeyAndroidKeyCodes(t *testing.T) {
+	for key, want := range map[string]string{"delete": `"keycode":67`, "menu": `"keycode":82`, "dpad_down": `"keycode":20`, "search": `"keycode":84`} {
+		var body string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if strings.Contains(r.URL.Path, "press_keycode") {
+				b, _ := io.ReadAll(r.Body)
+				body = string(b)
+			}
+			writeJSON(w, map[string]interface{}{"value": nil})
+		}))
+		d := createTestAppiumDriver(server)
+		res := d.pressKey(&flow.PressKeyStep{Key: key})
+		server.Close()
+		if !res.Success || !strings.Contains(body, want) {
+			t.Errorf("%s: success=%v body=%s, want %s", key, res.Success, body, want)
+		}
+	}
+}

@@ -1075,16 +1075,28 @@ func (d *Driver) pressKey(step *flow.PressKeyStep) *core.CommandResult {
 }
 
 func (d *Driver) pressKeyAndroid(key string) *core.CommandResult {
+	// The same keys as the uiautomator2 driver. `delete` is KEYCODE_DEL (67,
+	// backspace) as there; it was 112, forward-delete, which removes nothing
+	// with the cursor at the end of a field.
 	keyMap := map[string]int{
 		"back":        4,
 		"home":        3,
+		"menu":        82,
 		"enter":       66,
 		"backspace":   67,
-		"delete":      112,
+		"delete":      67,
 		"tab":         61,
+		"space":       62,
 		"volume_up":   24,
 		"volume_down": 25,
 		"power":       26,
+		"camera":      27,
+		"search":      84,
+		"dpad_up":     19,
+		"dpad_down":   20,
+		"dpad_left":   21,
+		"dpad_right":  22,
+		"dpad_center": 23,
 	}
 
 	if keycode, ok := keyMap[key]; ok {
