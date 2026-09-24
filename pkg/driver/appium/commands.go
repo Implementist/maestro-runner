@@ -726,6 +726,16 @@ func (d *Driver) assertVisible(step *flow.AssertVisibleStep) *core.CommandResult
 			fmt.Sprintf("Element exists but is not visible: %s", step.Selector.Describe()))
 	}
 
+	// Either platform: an element less than 10% inside the viewport is not
+	// visible, whatever its attributes say. On iOS this is the only check, so
+	// a row below the fold used to pass (same rule as the WDA driver).
+	if info != nil {
+		if w, h := d.client.ScreenSize(); w > 0 && h > 0 && info.Bounds.VisiblePercentage(w, h) < 0.1 {
+			return errorResult(fmt.Errorf("element found but off screen"),
+				fmt.Sprintf("Element exists but is off screen: %s", step.Selector.Describe()))
+		}
+	}
+
 	return successResult(fmt.Sprintf("Element is visible: %s", step.Selector.Describe()), info)
 }
 
@@ -780,6 +790,7 @@ func (d *Driver) countVisibleMatches(sel flow.Selector) (int, error) {
 		return 0, err
 	}
 	d.platform = platform
+	elements = d.onScreen(elements)
 	return countDisplayed(FilterBySelector(elements, sel, platform)), nil
 }
 

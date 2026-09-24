@@ -565,6 +565,7 @@ func (d *Driver) findElementByPageSource(sel flow.Selector) (*core.ElementInfo, 
 		return nil, err
 	}
 	d.platform = platform
+	elements = d.onScreen(elements)
 
 	// Filter by selector
 	candidates := FilterBySelector(elements, sel, platform)
@@ -660,6 +661,25 @@ func (d *Driver) findElementForTap(sel flow.Selector, timeout time.Duration) (*c
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+// onScreen drops elements less than 10% inside the viewport. Page source lists
+// the whole accessibility tree, off-screen rows included, so without this a
+// below-the-fold element passed assertVisible and could win an index or a
+// tap. Same rule as Maestro's filterOutOfBounds and the uiautomator2 and WDA
+// drivers. Without a known screen size the list is returned unchanged.
+func (d *Driver) onScreen(elements []*ParsedElement) []*ParsedElement {
+	w, h := d.client.ScreenSize()
+	if w <= 0 || h <= 0 {
+		return elements
+	}
+	out := make([]*ParsedElement, 0, len(elements))
+	for _, e := range elements {
+		if e.Bounds.VisiblePercentage(w, h) >= 0.1 {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // needsFullSelectorMatch reports whether a text selector carries other fields
@@ -835,7 +855,7 @@ func (d *Driver) findElementRelativeWithContext(ctx context.Context, sel flow.Se
 			}
 			d.platform = platform
 
-			info, err := d.findElementRelativeWithElements(sel, elements, platform)
+			info, err := d.findElementRelativeWithElements(sel, d.onScreen(elements), platform)
 			if err == nil && info != nil {
 				return info, nil
 			}
@@ -857,7 +877,7 @@ func (d *Driver) findElementRelativeOnce(sel flow.Selector) (*core.ElementInfo, 
 	}
 	d.platform = platform
 
-	return d.findElementRelativeWithElements(sel, elements, platform)
+	return d.findElementRelativeWithElements(sel, d.onScreen(elements), platform)
 }
 
 func (d *Driver) findElementRelativeWithElements(sel flow.Selector, allElements []*ParsedElement, platform string) (*core.ElementInfo, error) {
