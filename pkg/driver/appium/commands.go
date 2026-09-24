@@ -253,6 +253,19 @@ func (d *Driver) swipe(step *flow.SwipeStep) *core.CommandResult {
 		}
 	}
 
+	// distance: sets how far a screen swipe travels, as in the other drivers;
+	// it was ignored here, so every direction swipe used the fixed span below.
+	if step.Distance > 0 {
+		sx, sy, ex, ey, derr := core.DirectionSwipeScreenCoords(direction, w, h, step.Distance)
+		if derr != nil {
+			return errorResult(derr, fmt.Sprintf("Invalid swipe direction: %s", step.Direction))
+		}
+		if err := d.client.Swipe(sx, sy, ex, ey, duration); err != nil {
+			return errorResult(err, "Failed to swipe")
+		}
+		return successResult(fmt.Sprintf("Swiped %s %.0f%% of the screen", direction, step.Distance*100), nil)
+	}
+
 	// Swipe coordinates match Maestro behavior:
 	// UP:    50%,50% → 50%,10%
 	// DOWN:  50%,20% → 50%,90%

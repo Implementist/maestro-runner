@@ -155,3 +155,24 @@ func TestDragFromPointInsideTheElement(t *testing.T) {
 		t.Errorf("drag point (%d,%d), want (972,747)", x, y)
 	}
 }
+
+// swipe distance: 0.2 travels 20% of the screen height; it was ignored.
+func TestSwipeHonoursDistance(t *testing.T) {
+	d, body, _ := rowServer(t, "android")
+	if res := d.swipe(&flow.SwipeStep{Direction: "UP", Distance: 0.2}); !res.Success {
+		t.Fatalf("swipe: %s", res.Message)
+	}
+	acts := capturedActions(t, *body)
+	var startY, endY float64
+	for _, a := range acts {
+		if a["type"] == "pointerMove" {
+			if startY == 0 {
+				startY = a["y"].(float64)
+			}
+			endY = a["y"].(float64)
+		}
+	}
+	if travel := startY - endY; travel != 468 { // 20% of 2340
+		t.Errorf("swiped %v px, want 468 (20%% of 2340)", travel)
+	}
+}
