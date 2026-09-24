@@ -617,7 +617,13 @@ func (d *Driver) findElementForTap(sel flow.Selector, timeout time.Duration) (*c
 		var info *core.ElementInfo
 		var err error
 
-		if sel.Text != "" && d.platform == "ios" {
+		if needsFullSelectorMatch(sel) {
+			// The text queries below know only the text, so an id, a state
+			// filter or a size next to it was dropped and the first element
+			// with that text was tapped (the #157 defect, on the tap path).
+			// Page source checks every field together.
+			info, err = d.findElementByPageSource(sel)
+		} else if sel.Text != "" && d.platform == "ios" {
 			// iOS: exact match first, then page source with clickable prioritization
 			info, err = d.findElementForTapIOS(sel)
 		} else if sel.Text != "" && d.platform != "ios" {
@@ -637,6 +643,16 @@ func (d *Driver) findElementForTap(sel flow.Selector, timeout time.Duration) (*c
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+// needsFullSelectorMatch reports whether a text selector carries other fields
+// (id, state filters, size) that the text-only native queries cannot express.
+func needsFullSelectorMatch(sel flow.Selector) bool {
+	if sel.Text == "" {
+		return false
+	}
+	return sel.ID != "" || sel.Enabled != nil || sel.Selected != nil || sel.Focused != nil ||
+		sel.Checked != nil || sel.Width > 0 || sel.Height > 0
 }
 
 // findElementForTapDirect finds element for tap, trying clickable first then fallback to page source.
