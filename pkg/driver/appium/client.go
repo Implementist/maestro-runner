@@ -725,26 +725,37 @@ func (c *Client) SetLocation(lat, lon float64) error {
 
 // Clipboard
 
-// GetClipboard returns clipboard text.
+// GetClipboard reads the device clipboard. `mobile: getClipboard` first: it is
+// what current UiAutomator2 and XCUITest drivers support. The legacy
+// /appium/device/get_clipboard route is the fallback for older Appium.
 func (c *Client) GetClipboard() (string, error) {
-	resp, err := c.post(c.sessionPath()+"/appium/device/get_clipboard", map[string]interface{}{
-		"contentType": "plaintext",
-	})
-	if err != nil {
-		return "", err
+	var encoded string
+	if v, err := c.ExecuteMobile("getClipboard", map[string]interface{}{"contentType": "plaintext"}); err == nil {
+		encoded, _ = v.(string)
+	} else {
+		resp, lerr := c.post(c.sessionPath()+"/appium/device/get_clipboard", map[string]interface{}{
+			"contentType": "plaintext",
+		})
+		if lerr != nil {
+			return "", lerr
+		}
+		encoded, _ = resp["value"].(string)
 	}
-	encoded, _ := resp["value"].(string)
 	decoded, _ := base64.StdEncoding.DecodeString(encoded)
 	return string(decoded), nil
 }
 
-// SetClipboard sets clipboard text.
+// SetClipboard sets the device clipboard. Appium 3's UiAutomator2 driver no
+// longer serves /appium/device/set_clipboard, so the step 404'd there;
+// `mobile: setClipboard` works on current drivers of both platforms, and the
+// legacy route remains the fallback for older Appium.
 func (c *Client) SetClipboard(text string) error {
 	encoded := base64.StdEncoding.EncodeToString([]byte(text))
-	_, err := c.post(c.sessionPath()+"/appium/device/set_clipboard", map[string]interface{}{
-		"content":     encoded,
-		"contentType": "plaintext",
-	})
+	args := map[string]interface{}{"content": encoded, "contentType": "plaintext"}
+	if _, err := c.ExecuteMobile("setClipboard", args); err == nil {
+		return nil
+	}
+	_, err := c.post(c.sessionPath()+"/appium/device/set_clipboard", args)
 	return err
 }
 

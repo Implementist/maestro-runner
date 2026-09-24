@@ -73,3 +73,15 @@ func toStrings(v interface{}) []string {
 	}
 	return out
 }
+
+// setClipboard uses `mobile: setClipboard`, which current drivers support;
+// Appium 3's UiAutomator2 driver no longer serves /appium/device/set_clipboard.
+func TestSetClipboardUsesMobileCommand(t *testing.T) {
+	d, calls := recordMobileCalls(t)
+	if res := d.setClipboard(&flow.SetClipboardStep{Text: "hi"}); !res.Success {
+		t.Fatalf("setClipboard: %s", res.Message)
+	}
+	if len(*calls) == 0 || (*calls)[0].Script != "mobile: setClipboard" || (*calls)[0].Args["content"] != "aGk=" {
+		t.Errorf("calls = %+v, want mobile: setClipboard with base64 content", *calls)
+	}
+}

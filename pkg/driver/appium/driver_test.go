@@ -2012,7 +2012,8 @@ func TestOpenLinkError(t *testing.T) {
 func TestPasteTextError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(r.URL.Path, "/appium/device/get_clipboard") {
+		// Both the mobile: command and the legacy route fail.
+		if strings.Contains(r.URL.Path, "/appium/device/get_clipboard") || strings.HasSuffix(r.URL.Path, "/execute/sync") {
 			writeJSON(w, map[string]interface{}{
 				"value": map[string]interface{}{
 					"error":   "clipboard failed",
