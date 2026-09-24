@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -154,18 +156,27 @@ func (c *Client) Connect(capabilities map[string]interface{}) error {
 	if c.platform == "ios" {
 		// iOS XCUITest settings:
 		// - animationCoolOffTimeout: Don't wait for animations to finish (default 2s)
+		// - snapshotMaxDepth: WebDriverAgent defaults to 50, which clips deep
+		//   React Native trees, so elements inside a ScrollView drop out of
+		//   the page source; the WDA driver raises it to 100 (#171).
 		if err := c.SetSettings(map[string]interface{}{
 			"waitForIdleTimeout":      waitForIdleTimeout,
 			"animationCoolOffTimeout": 0,
+			"snapshotMaxDepth":        iosSnapshotMaxDepth(),
 		}); err != nil {
 			logger.Warn("failed to configure iOS XCUITest settings: %v", err)
 		}
 	} else {
 		// Android UiAutomator2 settings:
 		// - waitForSelectorTimeout: Don't add extra wait when finding elements (default 0)
+		// - enableMultiWindows: search and page source span every window, so
+		//   dialogs, permission prompts and popup menus (which live in their
+		//   own window) are found; the server default only reads the focused
+		//   one. The uiautomator2 driver sets it too (#93).
 		if err := c.SetSettings(map[string]interface{}{
 			"waitForIdleTimeout":     waitForIdleTimeout,
 			"waitForSelectorTimeout": 0,
+			"enableMultiWindows":     true,
 		}); err != nil {
 			logger.Warn("failed to configure Android UiAutomator2 settings: %v", err)
 		}
@@ -942,4 +953,16 @@ var uuidRegex = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4
 // isUUIDFormat returns true if s matches the UUID format used by iOS simulators.
 func isUUIDFormat(s string) bool {
 	return uuidRegex.MatchString(s)
+}
+
+// iosSnapshotMaxDepth is the accessibility-snapshot depth cap for XCUITest
+// sessions: 100 by default, overridable with MAESTRO_WDA_SNAPSHOT_MAX_DEPTH,
+// the same knob the WDA driver reads.
+func iosSnapshotMaxDepth() int {
+	if v := os.Getenv("MAESTRO_WDA_SNAPSHOT_MAX_DEPTH"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 100
 }
