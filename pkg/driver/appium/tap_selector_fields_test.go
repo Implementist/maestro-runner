@@ -107,3 +107,25 @@ func TestPressKeyAndroidKeyCodes(t *testing.T) {
 		}
 	}
 }
+
+// The extended orientations reach the device on Android through /rotation;
+// /orientation accepts only PORTRAIT and LANDSCAPE, so they used to fail.
+func TestAndroidExtendedOrientationsUseRotation(t *testing.T) {
+	for o, want := range map[string]string{"LANDSCAPE_LEFT": `"z":90`, "UPSIDE_DOWN": `"z":180`, "LANDSCAPE_RIGHT": `"z":270`} {
+		var path, body string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == http.MethodPost {
+				b, _ := io.ReadAll(r.Body)
+				path, body = r.URL.Path, string(b)
+			}
+			writeJSON(w, map[string]interface{}{"value": nil})
+		}))
+		d := createTestAppiumDriver(server)
+		res := d.setOrientation(&flow.SetOrientationStep{Orientation: o})
+		server.Close()
+		if !res.Success || !strings.HasSuffix(path, "/rotation") || !strings.Contains(body, want) {
+			t.Errorf("%s: success=%v %s %s, want /rotation with %s", o, res.Success, path, body, want)
+		}
+	}
+}

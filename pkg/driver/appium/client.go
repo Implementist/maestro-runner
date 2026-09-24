@@ -701,6 +701,14 @@ func (c *Client) SetOrientation(orientation string) error {
 	return err
 }
 
+// SetRotation rotates the display to z degrees (0, 90, 180 or 270) via
+// POST /rotation. Unlike /orientation it reaches the landscape-left/right and
+// upside-down rotations; x and y are required by the protocol and ignored.
+func (c *Client) SetRotation(z int) error {
+	_, err := c.post(c.sessionPath()+"/rotation", map[string]interface{}{"x": 0, "y": 0, "z": z})
+	return err
+}
+
 // Location
 
 // SetLocation sets the device location.

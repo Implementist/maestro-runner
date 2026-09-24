@@ -984,6 +984,21 @@ func (d *Driver) setLocation(step *flow.SetLocationStep) *core.CommandResult {
 
 func (d *Driver) setOrientation(step *flow.SetOrientationStep) *core.CommandResult {
 	orientation := strings.ToLower(step.Orientation)
+
+	// /orientation takes only PORTRAIT and LANDSCAPE, so the extended values
+	// failed. On Android they go through /rotation, which the UiAutomator2
+	// server turns into the display rotation, the same rotations the
+	// uiautomator2 driver sets through user_rotation (1, 2, 3).
+	if d.platform != "ios" {
+		degrees := map[string]int{"landscape_left": 90, "upside_down": 180, "landscape_right": 270}
+		if z, ok := degrees[strings.ReplaceAll(orientation, "-", "_")]; ok {
+			if err := d.client.SetRotation(z); err != nil {
+				return errorResult(err, fmt.Sprintf("Failed to set orientation: %s", orientation))
+			}
+			return successResult(fmt.Sprintf("Set orientation to %s", orientation), nil)
+		}
+	}
+
 	if err := d.client.SetOrientation(orientation); err != nil {
 		return errorResult(err, fmt.Sprintf("Failed to set orientation: %s", orientation))
 	}
