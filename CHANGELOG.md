@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`retry` counts retries, not attempts, as Maestro does.** `maxRetries: 1` now runs the commands twice (once, then one retry), an unset `maxRetries` means one retry, and the value is capped at 3. The runner ran exactly `maxRetries` attempts, three when unset and with no cap, so `maxRetries: 1` never retried. A value that is not an integer is logged and read as 1 instead of failing the step.
 - **WDA `launchApp` restarts a running app unless `stopApp: false`, as Maestro does.** It only activated the running app, so a relaunch left the app on the screen it was already on, and a flow checking what survives a restart restarted nothing.
 - **WDA `notVisible` passes only when a lookup finds the element absent.** `assertNotVisible` and `extendedWaitUntil: notVisible` treated any failed lookup, such as an unreadable page source or a dropped connection, as the element being gone, so they could pass without the screen being looked at. Other errors are now retried until the timeout, and then fail the step.
+- **`checked` selectors work on iOS.** The iOS drivers dropped `checked` with a warning, so `checked: true` matched a switch in either state. WDA now derives checked from a CheckBox, Switch or Toggle whose value is 1, as Maestro does, and filters on it on every path (tap, assert, relative).
 
 ## [1.1.28] - 2026-09-30
 
