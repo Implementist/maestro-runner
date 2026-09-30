@@ -67,6 +67,27 @@ func TestMatchesSelfFields(t *testing.T) {
 	}
 }
 
+// The #188 cases: text and ids match whole, as in Maestro.
+func TestMatchesSelfWholeText(t *testing.T) {
+	row := node(1, "Cell", "Talk · Open", 0, 0, 100, 30)
+	row.ID = "com.app:id/login_button"
+	cases := []struct {
+		sel  flow.Selector
+		want bool
+	}{
+		{flow.Selector{Text: "Open"}, false},
+		{flow.Selector{Text: ".*Open.*"}, true},
+		{flow.Selector{Text: "talk · open"}, true},
+		{flow.Selector{ID: "login"}, false},
+		{flow.Selector{ID: "login_button"}, true},
+	}
+	for _, c := range cases {
+		if got := matchesSelf(row, c.sel); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.sel.Describe(), got, c.want)
+		}
+	}
+}
+
 func TestInvisibleNodesDoNotMatch(t *testing.T) {
 	n := node(1, "Button", "Hidden", 0, 0, 10, 10)
 	n.Vis = 0.05

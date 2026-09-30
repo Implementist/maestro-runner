@@ -267,3 +267,20 @@ func TestNoTargetAppIsNotASnapshotFailure(t *testing.T) {
 		t.Error("NO_TARGET_APP must not be treated as a snapshot failure")
 	}
 }
+
+// TestQuerySelectorAnswerIsCheckedAgainstSelector: the runner's
+// querySelector compares text with the identifier too, so its answer is held
+// to the selector the snapshot path applies (#178, #188). Here it returns a
+// "Talk · Open" row whose identifier is "open" for `text: Open`.
+func TestQuerySelectorAnswerIsCheckedAgainstSelector(t *testing.T) {
+	body := `{"ok":true,"data":{"source":"xctest","appState":"runningForeground","found":true,"nodes":[` +
+		`{"index":0,"type":"Cell","identifier":"open","label":"Talk · Open","rect":{"x":0,"y":0,"width":100,"height":40},` +
+		`"enabled":true,"hittable":true,"depth":0}]}}`
+	d := scriptedDriver(t, always(body))
+	if node, err := d.findElement(flow.Selector{Text: "Open"}, false, 300); err == nil {
+		t.Fatalf("found %+v for text Open, want not found", node)
+	}
+	if node, err := d.findElement(flow.Selector{Text: "Talk · Open"}, false, 300); err != nil || node == nil {
+		t.Fatalf("whole label not found: %v", err)
+	}
+}

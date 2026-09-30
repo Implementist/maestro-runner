@@ -1354,8 +1354,11 @@ func (d *Driver) findElement(sel flow.Selector, optional bool, stepTimeoutMs int
 		// Catches elements that the snapshot's flat tree misses on deep RN
 		// hierarchies (the snapshot truncates / omits some nested .other
 		// containers; XCUI's query DSL can still find children inside them).
+		// The runner compares text against the identifier too, which Maestro
+		// never does (#178), so its answer is held to the same selector the
+		// snapshot path applies (#188).
 		if qsOK {
-			if node, qerr := d.resolveByQuerySelector(qsKey, qsValue); qerr == nil && node != nil {
+			if node, qerr := d.resolveByQuerySelector(qsKey, qsValue); qerr == nil && node != nil && matchesSelector(node, sel) {
 				return node, nil
 			}
 		}
