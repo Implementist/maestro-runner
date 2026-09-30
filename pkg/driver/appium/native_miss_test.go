@@ -123,21 +123,25 @@ func TestIOSPlaceholderOnlyTextStillFound(t *testing.T) {
 	}
 }
 
-// accessibility id is exact; the page-source matcher takes a literal id as a
-// substring. "username" must still reach "username-input".
-func TestIOSLiteralIDSubstringStillFound(t *testing.T) {
+// Ids match whole, as Maestro's idMatches (#188): "username" is not
+// "username-input", even when the native probe sees something containing it;
+// the page source decides. "username-input" itself is found.
+func TestIOSLiteralIDIsNotASubstring(t *testing.T) {
 	d, s := newNativeMissDriver(t, func(using, value string) (string, string) {
-		if using == "-ios predicate string" && value == `name CONTAINS "username"` {
+		if using == "-ios predicate string" && strings.Contains(value, `"username`) {
 			return "field-1", ""
 		}
 		return "", "no such element"
 	})
 
-	if _, err := d.findElementDirect(flow.Selector{ID: "username"}); err != nil {
-		t.Fatalf("id matched by substring was not found: %v", err)
+	if _, err := d.findElementDirect(flow.Selector{ID: "username"}); err == nil {
+		t.Fatal("id matched part of username-input")
 	}
 	if s.sources != 1 {
-		t.Errorf("page source fetched %d times, want 1 (the match is resolved there, as before)", s.sources)
+		t.Errorf("page source fetched %d times, want 1 (the match is resolved there)", s.sources)
+	}
+	if _, err := d.findElementDirect(flow.Selector{ID: "username-input"}); err != nil {
+		t.Fatalf("whole id was not found: %v", err)
 	}
 }
 

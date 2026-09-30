@@ -64,28 +64,24 @@ func matchesSelector(n *SnapshotNode, sel flow.Selector) bool {
 	return true
 }
 
+// matchesID reports whether an id selector matches an accessibility
+// identifier as Maestro's idMatches does: a case-insensitive regex over the
+// whole identifier, so `id: enriched-text` is not `set-enriched-text-button`
+// (#128, #188). An empty pattern matches anything.
 func matchesID(pattern, id string) bool {
 	if pattern == "" {
 		return true
 	}
-	if pattern == id {
-		return true
-	}
-	if looksLikeRegex(pattern) {
-		if re, err := regexp.Compile(pattern); err == nil {
-			return re.MatchString(id)
-		}
-	}
-	// Fall back to substring match (lenient — matches Maestro/WDA).
-	return containsIgnoreCase(id, pattern)
+	return core.MatchesIDMaestro(pattern, id)
 }
 
 // preferExactID narrows a set of id-selector matches to only those whose
 // identifier equals the selector id exactly, when at least one such exact
-// match exists. Without this, matchesID's lenient substring fallback lets a
-// superset id win by snapshot order — e.g. `id: enriched-text` resolving to
+// match exists. matchesID ignores case, as Maestro does, so of "Login" and
+// "login" the one written as in the selector wins. It was added when
+// matchesID matched substrings and `id: enriched-text` could resolve to
 // `set-enriched-text-button` (#128). No-op for empty/regex ids or when no
-// exact match is present (keeps the lenient behavior).
+// exact match is present.
 func preferExactID(hits []SnapshotNode, sel flow.Selector) []SnapshotNode {
 	if sel.ID == "" || looksLikeRegex(sel.ID) || len(hits) < 2 {
 		return hits
@@ -105,14 +101,11 @@ func preferExactID(hits []SnapshotNode, sel flow.Selector) []SnapshotNode {
 // preferExactText narrows survivors to those whose text matches the literal
 // pattern exactly, when any of them do.
 //
-// Literal text matched by contains alone, so `text: "0"` resolved to a price
-// field reading "7000.00" ahead of the switch whose text is exactly "0", and
-// the tap landed in the wrong place. Upstream Maestro does not have this
-// problem because its matcher is a full match (Filters.kt uses
-// `regex.matches(value)`), so "0" never matches "7000.00" there at all; our
-// contains behaviour is the deviation. Preferring exact matches keeps the
-// looser behaviour available for the genuine substring selectors flows rely
-// on, while giving the specific element priority when one exists.
+// Added when literal text matched by contains, so `text: "0"` resolved to a
+// price field reading "7000.00" ahead of the switch whose text is exactly "0"
+// (#161). Text now matches whole, as in Maestro (#188), so "0" no longer
+// matches "7000.00" at all; this still puts an exact value ahead of one a
+// dotted or line-wrapped selector matches only as a regex.
 //
 // Applied AFTER the full selector has been satisfied, never instead of it. An
 // exact text match that skipped the rest of the selector would return an
@@ -136,48 +129,17 @@ func preferExactText(hits []SnapshotNode, sel flow.Selector) []SnapshotNode {
 	return hits
 }
 
-// matchesText returns true if `pattern` matches any of the given texts.
-// Empty texts are skipped. Pattern may be:
-//   - exact (case-insensitive)
-//   - regex (compiled if it looks regex-ish — see looksLikeRegex)
-//   - substring (case-insensitive) as a last resort
+// matchesText returns true if `pattern` matches any of the given texts, as
+// Maestro's textMatches does: the selector is a case-insensitive regex that
+// must match a whole value, so "Open" is not "Talk · Open" (#188); a partial
+// match is written `.*Open.*`. An empty pattern matches anything.
+// snapshotMatching puts matches in the pattern's own case first when several
+// elements match (#151).
 func matchesText(pattern string, texts ...string) bool {
 	if pattern == "" {
 		return true
 	}
-	patternLower := strings.ToLower(pattern)
-
-	// Try regex first if pattern looks regex-ish. Case-insensitive, as in
-	// Maestro (IGNORE_CASE); snapshotMatching puts matches in the pattern's
-	// own case first when several elements match (#151).
-	if looksLikeRegex(pattern) {
-		if re, err := regexp.Compile("(?i)" + pattern); err == nil {
-			for _, t := range texts {
-				if t != "" && re.MatchString(t) {
-					return true
-				}
-			}
-			// Fall through if no regex hit — try substring.
-		}
-	}
-
-	for _, t := range texts {
-		if t == "" {
-			continue
-		}
-		tLower := strings.ToLower(t)
-		if tLower == patternLower {
-			return true
-		}
-		if strings.Contains(tLower, patternLower) {
-			return true
-		}
-	}
-	return false
-}
-
-func containsIgnoreCase(s, substr string) bool {
-	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+	return core.MatchesTextMaestro(pattern, texts...)
 }
 
 func withinTolerance(actual, expected, tolerance int) bool {

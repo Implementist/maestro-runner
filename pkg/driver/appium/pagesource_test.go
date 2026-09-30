@@ -183,16 +183,16 @@ func TestFilterBySelector_Android(t *testing.T) {
 		selector flow.Selector
 		expected int
 	}{
-		// An exact match exists, so only it is returned — "Hello World" and
-		// the "Hello button" content-desc no longer come along. This is what
-		// upstream does: its matcher is a full match, so "Hello" never matches
-		// "Hello World" there at all.
-		{"exact match wins over contains", flow.Selector{Text: "Hello"}, 1},
-		{"exact match wins on content-desc too", flow.Selector{Text: "World"}, 1},
-		// No element's text IS "ello", so the contains behaviour still applies.
-		{"contains when nothing matches exactly", flow.Selector{Text: "ello"}, 3},
+		// Text matches a whole value, as upstream's full match does (#188):
+		// "Hello" is not "Hello World" or the "Hello button" content-desc.
+		{"whole match only", flow.Selector{Text: "Hello"}, 1},
+		{"whole match on text", flow.Selector{Text: "World"}, 1},
+		{"no substring match", flow.Selector{Text: "ello"}, 0},
+		{"partial match written as regex", flow.Selector{Text: ".*ello.*"}, 3},
 		{"by ID", flow.Selector{ID: "id/hello"}, 1},
-		{"by ID partial", flow.Selector{ID: "id/"}, 4},
+		{"by ID after the prefix", flow.Selector{ID: "hello"}, 1},
+		{"by ID is not a substring", flow.Selector{ID: "id/"}, 0},
+		{"by ID partial written as regex", flow.Selector{ID: "id/.*"}, 4},
 		{"by enabled true", flow.Selector{Enabled: boolPtr(true)}, 3},
 		{"by enabled false", flow.Selector{Enabled: boolPtr(false)}, 1},
 	}
@@ -220,15 +220,17 @@ func TestFilterBySelector_iOS(t *testing.T) {
 		selector flow.Selector
 		expected int
 	}{
-		// "Submit" is exactly one element's label, so "Submit Order" and the
-		// "Submit value" field drop out.
-		{"exact label wins over contains", flow.Selector{Text: "Submit"}, 1},
-		{"contains when nothing matches exactly", flow.Selector{Text: "ubmit"}, 3},
+		// Text matches a whole label or value (#188): "Submit" is not
+		// "Submit Order" or the "Submit value" field.
+		{"whole label only", flow.Selector{Text: "Submit"}, 1},
+		{"no substring match", flow.Selector{Text: "ubmit"}, 0},
+		{"partial match written as regex", flow.Selector{Text: ".*ubmit.*"}, 3},
 		{"by ID (name)", flow.Selector{ID: "submitBtn"}, 1},
-		{"by ID partial", flow.Selector{ID: "Btn"}, 3},
+		{"by ID is not a substring", flow.Selector{ID: "Btn"}, 0},
+		{"by ID partial written as regex", flow.Selector{ID: ".*Btn"}, 3},
 		// Text never reaches the accessibility identifier: "btn" is only in names (#178).
 		{"text does not match identifier", flow.Selector{Text: "btn"}, 0},
-		{"text does not match identifier word", flow.Selector{Text: "order"}, 1},
+		{"text does not match identifier word", flow.Selector{Text: "submit order"}, 1},
 	}
 
 	for _, tt := range tests {
@@ -249,7 +251,8 @@ func TestFilterBySelector_Regex(t *testing.T) {
 		{Text: "No price here"},
 	}
 
-	sel := flow.Selector{Text: `Price: \$\d+`}
+	// The regex covers the whole text, as Maestro's full match needs (#188).
+	sel := flow.Selector{Text: `Price: \$\d+.*`}
 	result := FilterBySelector(elements, sel, "android")
 
 	if len(result) != 2 {
@@ -454,11 +457,15 @@ func TestMatchesText(t *testing.T) {
 		texts    []string
 		expected bool
 	}{
+		// Whole match, as Maestro's textMatches (#188); it used to be a
+		// substring match.
 		{"exact match", "Hello", []string{"Hello"}, true},
-		{"contains", "ell", []string{"Hello"}, true},
+		{"not a substring", "ell", []string{"Hello"}, false},
 		{"case insensitive", "HELLO", []string{"hello"}, true},
 		{"no match", "xyz", []string{"Hello"}, false},
-		{"regex match", "\\d+", []string{"Price: 100"}, true},
+		{"regex match", "Price: \\d+", []string{"Price: 100"}, true},
+		{"regex must cover the whole text", "\\d+", []string{"Price: 100"}, false},
+		{"content-desc label", "English", []string{"", "Language: English"}, false},
 		{"regex no match", "^\\d+$", []string{"Price: 100"}, false},
 		{"multiple texts", "World", []string{"Hello", "World"}, true},
 	}
@@ -512,12 +519,16 @@ func TestMatchesID(t *testing.T) {
 		id      string
 		want    bool
 	}{
-		{"literal contains", "login", "com.app:id/login_btn", true},
+		// Whole match against the id or the part after its package prefix,
+		// as Maestro's idMatches (#188); it used to be a substring match.
+		{"literal is not a substring", "login", "com.app:id/login_btn", false},
+		{"literal after prefix", "login_btn", "com.app:id/login_btn", true},
 		{"literal no match", "signup", "com.app:id/login_btn", false},
 		{"regex match", "login_\\d+", "com.app:id/login_123", true},
-		{"regex no match", "^login$", "com.app:id/login", false},
+		{"anchored regex after prefix", "^login$", "com.app:id/login", true},
 		{"wildcard match", "item_.*", "item_abc", true},
-		{"invalid regex fallback", "[invalid", "test[invalid", true},
+		{"invalid regex is literal", "[invalid", "[invalid", true},
+		{"invalid regex literal is whole", "[invalid", "test[invalid", false},
 	}
 
 	for _, tt := range tests {
@@ -711,12 +722,29 @@ func TestFilterBySelector_PrefersExactText(t *testing.T) {
 	}
 }
 
-func TestFilterBySelector_FallsBackToContains(t *testing.T) {
-	// No exact match exists, so the substring behaviour flows rely on stands.
+// Text matches whole, as in Maestro (#188), so part of a value finds nothing;
+// the substring match this used to pin is written as a regex.
+func TestFilterBySelector_NoSubstringMatch(t *testing.T) {
 	elements := []*ParsedElement{{Text: "Good till Cancel"}}
-	got := FilterBySelector(elements, flow.Selector{Text: "till Can"}, "android")
-	if len(got) != 1 {
-		t.Fatalf("expected the contains match to survive, got %d", len(got))
+	if got := FilterBySelector(elements, flow.Selector{Text: "till Can"}, "android"); len(got) != 0 {
+		t.Fatalf("plain text must not match part of a value, got %d", len(got))
+	}
+	if got := FilterBySelector(elements, flow.Selector{Text: ".*till Can.*"}, "android"); len(got) != 1 {
+		t.Fatalf("expected the regex to match, got %d", len(got))
+	}
+}
+
+// The #188 / #178 reports on Android: "Open" tapped a "Talk · Open" row and
+// "English" matched a "Language: English" content-desc.
+func TestFilterBySelector_Issue188WholeText(t *testing.T) {
+	elements := []*ParsedElement{{Text: "Talk · Open"}, {ContentDesc: "Language: English"}}
+	for _, text := range []string{"Open", "English"} {
+		if got := FilterBySelector(elements, flow.Selector{Text: text}, "android"); len(got) != 0 {
+			t.Errorf("%q must not match part of a value, got %d", text, len(got))
+		}
+	}
+	if got := FilterBySelector(elements, flow.Selector{Text: ".*Open.*"}, "android"); len(got) != 1 {
+		t.Errorf(".*Open.* should match the row, got %d", len(got))
 	}
 }
 

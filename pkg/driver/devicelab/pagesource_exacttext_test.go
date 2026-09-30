@@ -24,13 +24,37 @@ func TestFilterBySelector_ExactContentDescCounts(t *testing.T) {
 	}
 }
 
-// No element's text IS the pattern, so the substring behaviour flows rely on
-// stands.
-func TestFilterBySelector_FallsBackToContains(t *testing.T) {
+// Text matches whole, as in Maestro (#188): no element's text IS "Cancel", so
+// nothing matches. The substring match this used to pin is written as a regex.
+func TestFilterBySelector_NoSubstringMatch(t *testing.T) {
 	elements := []*ParsedElement{{Text: "Good till Cancel", Displayed: true}, {Text: "Cancel order", Displayed: true}}
-	got := FilterBySelector(elements, flow.Selector{Text: "Cancel"})
-	if len(got) != 2 {
-		t.Fatalf("expected both contains matches to survive, got %d", len(got))
+	if got := FilterBySelector(elements, flow.Selector{Text: "Cancel"}); len(got) != 0 {
+		t.Fatalf("plain text must not match part of a value, got %d", len(got))
+	}
+	if got := FilterBySelector(elements, flow.Selector{Text: ".*Cancel.*"}); len(got) != 2 {
+		t.Fatalf("expected both matches for .*Cancel.*, got %d", len(got))
+	}
+}
+
+// The #188 / #178 reports: "Open" tapped a "Talk · Open" row and "English"
+// matched a "Language: English" content-desc.
+func TestFilterBySelector_Issue188WholeText(t *testing.T) {
+	elements := []*ParsedElement{
+		{Text: "Talk · Open", Displayed: true},
+		{ContentDesc: "Language: English", Displayed: true},
+		{Text: "Jawy. All nodes connected. Nodes", Displayed: true},
+	}
+	for _, text := range []string{"Open", "English", "Jawy"} {
+		if got := FilterBySelector(elements, flow.Selector{Text: text}); len(got) != 0 {
+			t.Errorf("%q must not match part of a value, got %q/%q", text, got[0].Text, got[0].ContentDesc)
+		}
+	}
+	if got := FilterBySelector(elements, flow.Selector{Text: ".*Open.*"}); len(got) != 1 {
+		t.Errorf(".*Open.* should match the row, got %d", len(got))
+	}
+	elements = append(elements, &ParsedElement{Text: "open", Displayed: true})
+	if got := FilterBySelector(elements, flow.Selector{Text: "Open"}); len(got) != 1 || got[0].Text != "open" {
+		t.Errorf("Open should match only the whole value, ignoring case, got %d", len(got))
 	}
 }
 

@@ -42,3 +42,23 @@ func TestPreferExactText(t *testing.T) {
 		}
 	})
 }
+
+// Text and ids match whole, as Maestro's textMatches/idMatches (#188): "Open"
+// is not a "Talk · Open" row; a partial match is written as a regex.
+func TestMatchesTextAndIDWhole(t *testing.T) {
+	if matchesText("Open", "Talk · Open") {
+		t.Error(`"Open" must not match "Talk · Open"`)
+	}
+	if !matchesText("open", "", "Open") || !matchesText(".*Open.*", "Talk · Open") {
+		t.Error("whole match ignoring case, or a written regex, should match")
+	}
+	if !matchesText("$7.50", "$7.50") {
+		t.Error("a value equal to the selector should match")
+	}
+	if matchesID("enriched-text", "set-enriched-text-button") || !matchesID("Enriched-Text", "enriched-text") {
+		t.Error("ids should match whole, ignoring case")
+	}
+	if !matchesText("", "anything") || !matchesID("", "anything") {
+		t.Error("an empty selector field matches anything")
+	}
+}

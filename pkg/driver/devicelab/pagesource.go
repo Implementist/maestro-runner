@@ -244,14 +244,11 @@ func preferExactID(elems []*ParsedElement, id string) []*ParsedElement {
 // preferExactText narrows survivors to those whose text matches the literal
 // pattern exactly, when any of them do.
 //
-// Literal text matched by contains alone, so `text: "0"` resolved to a price
-// field reading "7000.00" ahead of the switch whose text is exactly "0", and
-// the tap landed in the wrong place. Upstream Maestro does not have this
-// problem because its matcher is a full match (Filters.kt uses
-// `regex.matches(value)`), so "0" never matches "7000.00" there at all; our
-// contains behaviour is the deviation. Preferring exact matches keeps the
-// looser behaviour available for the genuine substring selectors flows rely
-// on, while giving the specific element priority when one exists.
+// Added when literal text matched by contains, so `text: "0"` resolved to a
+// price field reading "7000.00" ahead of the switch whose text is exactly "0"
+// (#161). Text now matches whole, as in Maestro (#188), so "0" no longer
+// matches "7000.00" at all; this still puts an exact value ahead of one a
+// dotted or line-wrapped selector matches only as a regex.
 //
 // Applied AFTER the full selector has been satisfied, never instead of it. An
 // exact text match that skipped the rest of the selector would return an
@@ -344,105 +341,22 @@ func withinTolerance(actual, expected, tolerance int) bool {
 	return diff <= tolerance
 }
 
-// matchesID checks if an ID pattern matches the given resource ID.
-// Always tries regex matching first; falls back to substring contains on compile error.
+// matchesID reports whether an id selector matches a resource id as Maestro's
+// idMatches does: a case-insensitive regex over the whole id, or over the part
+// after its package prefix. `id: login` is "com.app:id/login", not
+// "com.app:id/login_button" (#188); `id: Flatlist` finds "FlatList".
 func matchesID(pattern, id string) bool {
-	// Maestro compiles id selectors with IGNORE_CASE: `id: Flatlist` finds
-	// RNTester's "FlatList" item.
-	re, err := regexp.Compile("(?i)" + pattern)
-	if err != nil {
-		return strings.Contains(strings.ToLower(id), strings.ToLower(pattern))
-	}
-	// Maestro also matches the id after its package prefix, so an anchored
-	// `^auth\.login$` finds "com.app:id/auth.login".
-	return re.MatchString(id) || re.MatchString(id[strings.LastIndex(id, "/")+1:])
+	return core.MatchesIDMaestro(pattern, id)
 }
 
-// matchesText checks if pattern matches the element's text, content-desc, or hint.
-// If pattern looks like a regex (contains metacharacters), use regex matching.
-// Otherwise, use case-insensitive contains matching.
-// This matches Maestro's behavior: it checks text, hintText, and accessibilityText.
+// matchesText reports whether a text selector matches the element's text,
+// content-desc or hint, as Maestro's textMatches does: the selector is a
+// case-insensitive regex that must match a whole value, so "Open" is not
+// "Talk · Open" and "English" is not "Language: English" (#188); a partial
+// match is written `.*Open.*`. When several elements match, FilterBySelector
+// puts the ones matching in the pattern's own case first (#151).
 func matchesText(pattern, text, contentDesc, hintText string) bool {
-	// Check if pattern looks like a regex
-	if looksLikeRegex(pattern) {
-		// Case-insensitive, as in Maestro, which compiles every text selector
-		// with IGNORE_CASE: a flow written `(let's get started!|...)` passes
-		// there against "Let's get started!". When several elements match,
-		// FilterBySelector puts the ones matching in the pattern's own case
-		// first, so `^SIGN OUT$` still picks the "SIGN OUT" button over a
-		// "Sign out" row (#151).
-		//
-		// The whole string must match, as with Maestro's Regex.matches():
-		// `Passwords.*` is the "Passwords" row, not "Import Passwords from
-		// Google". Maestro also compiles with DOT_MATCHES_ALL.
-		//
-		// Plain text selectors fall to the case-insensitive contains path below.
-		re, err := regexp.Compile(`(?is)\A(?:` + pattern + `)\z`)
-		if err != nil {
-			// Invalid regex - fall back to literal matching
-			return containsIgnoreCase(text, pattern) ||
-				containsIgnoreCase(contentDesc, pattern) ||
-				containsIgnoreCase(hintText, pattern)
-		}
-
-		// Match against text (with newline stripping like Maestro)
-		if text != "" {
-			strippedText := strings.ReplaceAll(text, "\n", " ")
-			if re.MatchString(text) || re.MatchString(strippedText) || pattern == text || pattern == strippedText {
-				return true
-			}
-		}
-
-		// Match against content-desc (accessibility text)
-		if contentDesc != "" {
-			strippedDesc := strings.ReplaceAll(contentDesc, "\n", " ")
-			if re.MatchString(contentDesc) || re.MatchString(strippedDesc) || pattern == contentDesc || pattern == strippedDesc {
-				return true
-			}
-		}
-
-		// Match against hint text
-		if hintText != "" {
-			strippedHint := strings.ReplaceAll(hintText, "\n", " ")
-			if re.MatchString(hintText) || re.MatchString(strippedHint) || pattern == hintText || pattern == strippedHint {
-				return true
-			}
-		}
-
-		return false
-	}
-
-	// Literal text - case-insensitive contains. A dotted selector is a regex
-	// to Maestro and must match whole ("DDG." is not in "Not DDG."), so it
-	// skips this and goes to the whole-string match below.
-	// Text that wraps onto a new line matches with the break read as a
-	// space, as Maestro also matches each value with "\n" replaced by " ".
-	if !strings.Contains(pattern, ".") {
-		for _, s := range []string{text, contentDesc, hintText} {
-			if containsIgnoreCase(s, pattern) || containsIgnoreCase(strings.ReplaceAll(s, "\n", " "), pattern) {
-				return true
-			}
-		}
-	}
-
-	// A lone dot reads as plain text ("Mr. Smith"), but Maestro compiles every
-	// text selector as a regex, where it matches any character:
-	// "Protections.activated!" is the "Protections activated!" heading.
-	if strings.Contains(pattern, ".") {
-		if re, err := regexp.Compile(`(?is)\A(?:` + pattern + `)\z`); err == nil {
-			for _, s := range []string{text, contentDesc, hintText} {
-				if s != "" && (re.MatchString(s) || re.MatchString(strings.ReplaceAll(s, "\n", " "))) {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-// containsIgnoreCase checks if s contains substr (case-insensitive).
-func containsIgnoreCase(s, substr string) bool {
-	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+	return core.MatchesTextMaestro(pattern, text, contentDesc, hintText)
 }
 
 // Position filter functions
