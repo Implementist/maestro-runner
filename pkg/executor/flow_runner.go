@@ -76,6 +76,10 @@ func (fr *FlowRunner) Run() FlowResult {
 	// These take precedence over system env, but flow-level env takes precedence over these
 	fr.script.SetVariables(fr.config.Env)
 
+	// DEVICE_UDID: the device this flow runs on. The flow's own env: can
+	// still override it.
+	fr.setDeviceVariables()
+
 	// Set flow directory for relative path resolution
 	if fr.flow.SourcePath != "" {
 		fr.script.SetFlowDir(filepath.Dir(fr.flow.SourcePath))
@@ -1876,4 +1880,33 @@ func (fr *FlowRunner) markInteraction(step flow.Step) {
 		return
 	}
 	fr.script.MarkInteraction()
+}
+
+// setDeviceVariables sets DEVICE_UDID to the serial (Android) or UDID (iOS)
+// of the device this flow runs on. Under --parallel each device keeps its own
+// value for the whole run, so a flow can hand the app a per-device id (#187):
+// `launchApp: {arguments: {deviceId: ${DEVICE_UDID}}}`. A DEVICE_UDID the user
+// set (shell environment or -e) is kept.
+func (fr *FlowRunner) setDeviceVariables() {
+	if id := fr.deviceID(); id != "" {
+		if _, set := fr.script.Variables()["DEVICE_UDID"]; !set {
+			fr.script.SetVariable("DEVICE_UDID", id)
+		}
+	}
+}
+
+// deviceID is the serial or UDID of the device this flow runs on: the
+// worker's own device under --parallel (DeviceInfo), else the run's device,
+// else what the driver reports.
+func (fr *FlowRunner) deviceID() string {
+	if fr.config.DeviceInfo != nil && fr.config.DeviceInfo.ID != "" {
+		return fr.config.DeviceInfo.ID
+	}
+	if fr.config.Device.ID != "" {
+		return fr.config.Device.ID
+	}
+	if info := fr.driver.GetPlatformInfo(); info != nil {
+		return info.DeviceID
+	}
+	return ""
 }
