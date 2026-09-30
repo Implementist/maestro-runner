@@ -78,10 +78,11 @@ Examples:
 		},
 
 		// Environment variables
-		&cli.StringSliceFlag{
+		&cli.GenericFlag{
 			Name:    "env",
 			Aliases: []string{"e"},
-			Usage:   "Environment variables (KEY=VALUE)",
+			Usage:   "Environment variable for the flows: KEY=VALUE, or KEY alone to pass KEY from the shell environment. Repeat for more; a value may contain commas and '='",
+			Value:   &envValues{},
 		},
 		&cli.StringFlag{
 			Name:    "env-file",
@@ -681,7 +682,7 @@ func runTest(c *cli.Context) error {
 	}
 
 	// Parse environment variables
-	env := parseEnvVars(getStringSlice("env"))
+	env := parseEnvVars(takeEnvValues(c))
 
 	// Resolve output directory
 	outputDir, err := resolveOutputDir(getString("output"), getBool("flatten"))
@@ -1875,12 +1876,61 @@ func formatDuration(ms int64) string {
 func parseEnvVars(envs []string) map[string]string {
 	result := make(map[string]string)
 	for _, e := range envs {
+		// The first '=' separates: a name cannot contain one, a value can.
 		parts := strings.SplitN(e, "=", 2)
 		if len(parts) == 2 {
 			result[parts[0]] = parts[1]
+			continue
+		}
+		// KEY alone takes its value from the shell environment, as docker -e
+		// does, so values with spaces, commas or quotes need no quoting.
+		name := strings.TrimSpace(e)
+		if name == "" {
+			continue
+		}
+		if v, ok := os.LookupEnv(name); ok {
+			result[name] = v
+		} else {
+			logger.Warn("-e %s: not set in the environment, ignored", name)
 		}
 	}
 	return result
+}
+
+// envValues collects each -e as given. StringSliceFlag split every value at
+// commas, so -e REPLY="Thanks, going with Vue" reached the flow as
+// REPLY=Thanks (#189); tag lists keep their comma splitting.
+type envValues []string
+
+// envValuesCopy marks urfave's copy of the parsed value to the flag's other
+// name (-e and --env share one value): that copy is not another -e.
+const envValuesCopy = "\x00maestro-runner-env-values"
+
+func (e *envValues) Set(v string) error {
+	if v == envValuesCopy {
+		return nil
+	}
+	*e = append(*e, v)
+	return nil
+}
+func (e *envValues) String() string    { return strings.Join(*e, " ") }
+func (e *envValues) Serialize() string { return envValuesCopy }
+
+// takeEnvValues returns the -e values from the command or a parent, and
+// empties them: the flag value lives in the command definition, which
+// repeated runs in one process share.
+func takeEnvValues(c *cli.Context) []string {
+	for _, ctx := range c.Lineage() {
+		if ctx == nil {
+			continue
+		}
+		if v, ok := ctx.Generic("env").(*envValues); ok && v != nil && len(*v) > 0 {
+			out := append([]string(nil), *v...)
+			*v = nil
+			return out
+		}
+	}
+	return nil
 }
 
 // loadCapabilities loads Appium capabilities from a JSON file.

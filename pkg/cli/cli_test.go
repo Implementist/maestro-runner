@@ -126,6 +126,7 @@ func TestParseEnvVars_ValueWithEquals(t *testing.T) {
 }
 
 func TestParseEnvVars_InvalidFormat(t *testing.T) {
+	os.Unsetenv("NOEQUALS")
 	envs := []string{"NOEQUALS"}
 	result := parseEnvVars(envs)
 
@@ -2500,5 +2501,66 @@ func TestFirstDeclaredAppID(t *testing.T) {
 				t.Errorf("firstDeclaredAppID = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// KEY alone takes its value from the shell environment, as docker -e does; a
+// name that is not set there is left out.
+func TestParseEnvVars_NameOnlyFromEnvironment(t *testing.T) {
+	t.Setenv("MR_TEST_REPLY", "Thanks, going with Vue")
+	os.Unsetenv("MR_TEST_MISSING")
+	result := parseEnvVars([]string{"MR_TEST_REPLY", "MR_TEST_MISSING", "EMPTY="})
+	if got := result["MR_TEST_REPLY"]; got != "Thanks, going with Vue" {
+		t.Errorf("MR_TEST_REPLY = %q, want the shell value", got)
+	}
+	if _, ok := result["MR_TEST_MISSING"]; ok {
+		t.Error("an unset name should be left out")
+	}
+	if v, ok := result["EMPTY"]; !ok || v != "" {
+		t.Errorf("EMPTY= should be set to the empty string, got %q (set=%v)", v, ok)
+	}
+}
+
+// -e keeps each value whole: commas and '=' inside a value used to be split
+// by StringSliceFlag (#189). Tag lists keep splitting at commas.
+func TestEnvFlagKeepsCommasAndEquals(t *testing.T) {
+	var gotEnv map[string]string
+	var gotTags []string
+	app := &cli.App{
+		Flags: []cli.Flag{
+			&cli.GenericFlag{Name: "env", Aliases: []string{"e"}, Value: &envValues{}},
+			&cli.StringSliceFlag{Name: "include-tags"},
+		},
+		Action: func(c *cli.Context) error {
+			gotEnv = parseEnvVars(takeEnvValues(c))
+			gotTags = c.StringSlice("include-tags")
+			return nil
+		},
+	}
+	args := []string{"mr", "-e", "REPLY=Thanks, going with Vue", "-e", "QUERY=a=1&b=2", "-e", "URL=https://x.com/?a=b,c=d",
+		"--include-tags", "smoke,login"}
+	if err := app.Run(args); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"REPLY": "Thanks, going with Vue", "QUERY": "a=1&b=2", "URL": "https://x.com/?a=b,c=d"}
+	for k, v := range want {
+		if gotEnv[k] != v {
+			t.Errorf("%s = %q, want %q", k, gotEnv[k], v)
+		}
+	}
+	if len(gotEnv) != len(want) {
+		t.Errorf("env = %v, want exactly %v", gotEnv, want)
+	}
+	if len(gotTags) != 2 || gotTags[0] != "smoke" || gotTags[1] != "login" {
+		t.Errorf("include-tags = %v, want [smoke login]", gotTags)
+	}
+
+	// The flag value is shared by the command definition: a second run in the
+	// same process must not see the first run's -e values.
+	if err := app.Run([]string{"mr"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(gotEnv) != 0 {
+		t.Errorf("second run env = %v, want empty", gotEnv)
 	}
 }
