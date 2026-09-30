@@ -884,6 +884,81 @@ func (d *Driver) waitForFocused(wait time.Duration) core.Element {
 	}
 }
 
+// focusOnTappedWait bounds the wait for a tapped field to take focus. Focus
+// normally moves within a few hundred milliseconds of the tap.
+const focusOnTappedWait = 1500 * time.Millisecond
+
+// waitForTypingTarget returns the field keystrokes should go to. After a tap on
+// an element that is the tapped element, or a field inside it: a tap that
+// landed while the screen was still moving (a bottom sheet sliding in) did
+// nothing, the previous field kept its focus, and typing went into it (#189).
+// Typing starts as soon as the tapped field has focus, so a tap that worked
+// costs nothing extra. When a tapped text field never takes focus it is tapped
+// once more. Without a preceding tap, any focused field will do, as before.
+func (d *Driver) waitForTypingTarget() core.Element {
+	tapped := d.lastTapped
+	if tapped == nil {
+		return d.waitForFocused(focusWaitForTyping)
+	}
+	if focused := d.waitForFocusOn(tapped.Bounds, focusOnTappedWait); focused != nil {
+		return focused
+	}
+	if isTextField(tapped.Class) {
+		b := tapped.Bounds
+		logger.Info("[devicelab] inputText: the tapped field did not take focus; tapping it again")
+		if err := d.client.Click(b.X+b.Width/2, b.Y+b.Height/2); err == nil {
+			if focused := d.waitForFocusOn(b, focusOnTappedWait); focused != nil {
+				return focused
+			}
+		}
+	}
+	// The tap aimed at something that moves focus elsewhere (a label, a
+	// button that opens a field): type into whatever has focus, as before.
+	logger.Debug("[devicelab] inputText: focus is not on the tapped element; typing into the focused field")
+	return d.waitForFocused(focusWaitForTyping)
+}
+
+// waitForFocusOn waits for a focused field that lies on the tapped bounds.
+func (d *Driver) waitForFocusOn(tapped core.Bounds, wait time.Duration) core.Element {
+	deadline := time.Now().Add(wait)
+	for {
+		if focused, err := d.findFocused(); err == nil && focused != nil && focusIsOn(focused.Info(), tapped) {
+			return focused
+		}
+		if !time.Now().Before(deadline) {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// focusIsOn reports whether a focused field is the tapped element or lies
+// within it (a wrapper view tapped around its input), or holds its centre. A
+// field whose bounds are unknown is accepted: there is nothing to compare.
+func focusIsOn(focused *core.ElementInfo, tapped core.Bounds) bool {
+	if focused == nil {
+		return false
+	}
+	f := focused.Bounds
+	if f.Width <= 0 || f.Height <= 0 || tapped.Width <= 0 || tapped.Height <= 0 {
+		return true
+	}
+	fx, fy := f.X+f.Width/2, f.Y+f.Height/2
+	tx, ty := tapped.X+tapped.Width/2, tapped.Y+tapped.Height/2
+	return contains(tapped, fx, fy) || contains(f, tx, ty)
+}
+
+func contains(b core.Bounds, x, y int) bool {
+	return x >= b.X && x < b.X+b.Width && y >= b.Y && y < b.Y+b.Height
+}
+
+// isTextField reports whether an Android class name is an editable text field,
+// the only kind a second tap is sure to focus.
+func isTextField(class string) bool {
+	c := strings.ToLower(class)
+	return strings.Contains(c, "edittext") || strings.Contains(c, "textfield") || strings.Contains(c, "autocompletetextview")
+}
+
 func (d *Driver) inputText(step *flow.InputTextStep) *core.CommandResult {
 	text := step.Text
 	if text == "" {
@@ -987,7 +1062,7 @@ func (d *Driver) inputText(step *flow.InputTextStep) *core.CommandResult {
 		// before the field did — "https://…" landed as "tps://…". Wait
 		// briefly for focus, as Maestro's settle-before-command does.
 		typed := false
-		if focused := d.waitForFocused(focusWaitForTyping); focused != nil {
+		if focused := d.waitForTypingTarget(); focused != nil {
 			before, _ := focused.Text()
 			if err := focused.Input(text); err == nil {
 				typed = true
@@ -1680,15 +1755,15 @@ func (d *Driver) waitForTreeChange(before uint64, wait time.Duration) bool {
 // Settle limits. The agent reads the tree back to back and calls it settled
 // once it has stayed the same for settleQuietMs. waitForIdleTimeout: 0 skips
 // settling; its value does not cap it (the default is 200ms, far below what a
-// screen change takes). Maestro accepts
-// two equal consecutive reads, and so fails where an app pauses before its
-// next dialog: duckduckgo shows "Close Autofill Dialog" a moment after "Save
-// Password", and a 200ms window pressed Back before it appeared.
+// screen change takes). The window was 500ms because a 200ms one pressed Back
+// before duckduckgo's "Close Autofill Dialog" (shown a moment after "Save
+// Password") appeared, the way Maestro fails that flow; 200ms is back while
+// the full suites measure what the shorter window costs and gains.
 const (
 	openLinkChangeWait      = 3 * time.Second
 	openLinkSettleTimeoutMs = 5000
 	settleAfterTapTimeoutMs = 2000
-	settleQuietMs           = 500
+	settleQuietMs           = 200
 )
 
 // settle waits for the screen to stop changing, for at most maxMs; it is

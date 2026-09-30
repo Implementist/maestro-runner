@@ -124,6 +124,10 @@ type Driver struct {
 	// Set after a successful tap; back/pressKey settle first when it is set
 	lastStepWasTap bool
 
+	// The element the last step tapped, while the next inputText may be
+	// meant for it (nil after any other step)
+	lastTapped *core.ElementInfo
+
 	// Permissions each app declares, read once per run (nil: unreadable)
 	declaredPerms map[string]map[string]bool
 
@@ -671,6 +675,11 @@ func (d *Driver) Execute(step flow.Step) *core.CommandResult {
 		d.lastStepWasTap = result.Success
 	default:
 		d.lastStepWasTap = false
+	}
+	d.lastTapped = nil
+	if _, ok := step.(*flow.TapOnStep); ok && result.Success && result.Element != nil && result.Element.Bounds.Width > 0 {
+		tapped := *result.Element
+		d.lastTapped = &tapped
 	}
 
 	result.Duration = time.Since(start)
