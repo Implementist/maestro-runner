@@ -2559,8 +2559,31 @@ func (d *Driver) openLink(step *flow.OpenLinkStep) *core.CommandResult {
 // Media Commands
 // ============================================================================
 
+// fullScreenshotter is the device's own lossless capture (adb exec-out
+// screencap -p), at the screen's full resolution.
+type fullScreenshotter interface {
+	Screenshot() ([]byte, error)
+}
+
+// artifactScreenshot captures the screen for takeScreenshot and
+// assertScreenshot: full resolution and lossless, through adb. The agent's
+// screenshot is scaled to half size and JPEG-encoded for speed, which is fine
+// for settling and failure snapshots but made every assertScreenshot against a
+// baseline taken elsewhere fail on size (a 996x131 baseline read back as
+// 498x66). The agent's image is the fallback when adb cannot capture.
+func (d *Driver) artifactScreenshot() ([]byte, error) {
+	if dev, ok := d.device.(fullScreenshotter); ok {
+		if data, err := dev.Screenshot(); err == nil && len(data) > 0 {
+			return data, nil
+		} else if err != nil {
+			logger.Debug("[devicelab] adb screencap failed, using the agent's screenshot: %v", err)
+		}
+	}
+	return d.client.Screenshot()
+}
+
 func (d *Driver) takeScreenshot(step *flow.TakeScreenshotStep) *core.CommandResult {
-	data, err := d.client.Screenshot()
+	data, err := d.artifactScreenshot()
 	if err != nil {
 		return errorResult(err, fmt.Sprintf("Failed to take screenshot: %v", err))
 	}
