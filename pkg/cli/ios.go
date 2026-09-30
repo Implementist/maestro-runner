@@ -37,17 +37,18 @@ type iosDeviceInfo struct {
 	IsSimulator bool
 }
 
-// CreateIOSDriver creates an iOS driver using WebDriverAgent.
-// Exported for library use.
+// CreateIOSDriver creates the iOS driver cfg.Driver names. Exported for
+// library use.
 func CreateIOSDriver(cfg *RunConfig) (core.Driver, func(), error) {
-	// --driver devicelab: the prebuilt devicelab-ios-agent
-	// (pkg/driver/devicelab_ios). --driver devicelab-legacy: the previous
-	// runner built from source (pkg/driver/devicelab_ios_legacy). Both are
+	// The default is devicelab, the prebuilt devicelab-ios-agent
+	// (pkg/driver/devicelab_ios), on simulators and real iPhones.
+	// --driver wda selects WebDriverAgent. --driver devicelab-legacy is the
+	// previous runner built from source (pkg/driver/devicelab_ios_legacy),
 	// simulator-only.
-	if strings.EqualFold(cfg.Driver, "devicelab-legacy") {
+	switch iosDriverName(cfg.Driver) {
+	case "devicelab-legacy":
 		return createDevicelabLegacyIOSDriver(cfg)
-	}
-	if strings.EqualFold(cfg.Driver, "devicelab") {
+	case "devicelab":
 		return createDevicelabIOSDriver(cfg)
 	}
 
@@ -641,4 +642,15 @@ func listPhysicalIOSUDIDs() ([]string, error) {
 		}
 	}
 	return udids, nil
+}
+
+// iosDriverName returns the iOS driver a --driver value selects. Unset means
+// the iOS default, devicelab; "uiautomator2" is the Android driver and on iOS
+// is taken as unset too, as it always was.
+func iosDriverName(driver string) string {
+	d := strings.ToLower(driver)
+	if d == "" || d == "uiautomator2" {
+		return "devicelab"
+	}
+	return d
 }

@@ -82,7 +82,7 @@ maestro-runner test --parallel 3 flows/                                 # Parall
 - **Cloud testing** — BrowserStack, Sauce Labs, LambdaTest, TestingBot via Appium driver [Guide →](https://devicelab.dev/blog/run-maestro-flows-any-cloud)
 - **Desktop browser testing** — Run Maestro flows on Chrome/Chromium via CDP. Supports `css`, `xpath`, `id`, and `text` selectors with `--platform web` [Guide →](https://devicelab.dev/open-source/maestro-runner/docs/web-testing)
 - **React Native & Flutter** — Smart element finding for RN testIDs and Flutter semantics [Guide →](https://devicelab.dev/blog/flutter-testing-maestro-patrol-appium)
-- **DeviceLab driver** — The default Android driver: an on-device agent over WebSocket, ~2x faster than UIAutomator2 and ~5x faster than Maestro CLI. On iOS, `--driver devicelab` runs the DeviceLab iOS agent on simulators and real iPhones
+- **DeviceLab driver** — The default driver on Android and iOS. On Android an on-device agent over WebSocket, ~2x faster than UIAutomator2 and ~5x faster than Maestro CLI; on iOS a prebuilt XCUITest agent, on simulators and real iPhones
 - **Parallel execution** — Dynamic work distribution across devices, not static sharding. Faster devices pick up more tests automatically, so no device sits idle
 - **App install built-in** — `--app-file app.apk` installs the app before testing, so you always test the right build
 - **Wide OS compatibility** — Android 5.0+ (API 21+) and iOS 15.0+, no version restrictions
@@ -103,8 +103,8 @@ maestro-runner test --parallel 3 flows/                                 # Parall
 |--------|----------|-------------|
 | **DeviceLab** | Android | Default since v1.1.28. On-device WebSocket driver, ~2x faster than UIAutomator2. |
 | **UIAutomator2** | Android | `--driver uiautomator2`. Direct connection to the device, no external server needed. |
-| **WDA (WebDriverAgent)** | iOS | Default with `--platform ios`. Supports simulators and physical devices. |
-| **DeviceLab** | iOS | `--driver devicelab`. The DeviceLab iOS agent, on simulators and real iPhones (real iPhones need `--team-id`). `--driver devicelab-legacy` keeps the previous runner. |
+| **DeviceLab** | iOS | Default since v1.1.28. The DeviceLab iOS agent, on simulators and real iPhones (real iPhones need `--team-id`). `--driver devicelab-legacy` keeps the previous runner. |
+| **WDA (WebDriverAgent)** | iOS | `--driver wda`. Supports simulators and physical devices. |
 | **Browser (CDP)** | Web | `--platform web`. Chrome/Chromium automation via Chrome DevTools Protocol. |
 | **Appium** | Android & iOS | `--driver appium`. For cloud testing providers and existing Appium infrastructure. |
 

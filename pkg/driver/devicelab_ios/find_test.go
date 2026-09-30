@@ -270,3 +270,21 @@ func TestBoundsMatchMaestroEdges(t *testing.T) {
 		}
 	}
 }
+
+// TestHive's search icon and its text field are siblings with the same id,
+// the icon first in tree order. A tap must take the field: a tap on the icon
+// never focused it, and inputText failed with NO_FOCUS on every device.
+func TestSameIDPrefersTheControl(t *testing.T) {
+	icon := node(15, "Image", "Search", 34, 147, 16, 17)
+	icon.ID = "search-bar"
+	field := node(16, "TextField", "", 60, 144, 309, 22)
+	field.ID = "search-bar"
+	field.Placeholder = "Search frameworks..."
+	got, err := pick(&screen{nodes: []Node{icon, field}, width: 402, height: 874}, flow.Selector{ID: "search-bar"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.I != 16 {
+		t.Errorf("picked node %d (%s), want the text field (16)", got.I, got.Type)
+	}
+}

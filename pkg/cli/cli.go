@@ -33,9 +33,9 @@ var GlobalFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:    "driver",
 		Aliases: []string{"d"},
-		Usage:   "Driver to use. Android: devicelab (default) or uiautomator2 or appium; iOS: wda (default) or devicelab or appium (devicelab-legacy: the previous devicelab runner, kept for comparison); web: cdp. Leave unset to take each platform's default.",
+		Usage:   "Driver to use. Android: devicelab (default) or uiautomator2 or appium; iOS: devicelab (default) or wda or appium (devicelab-legacy: the previous devicelab runner, kept for comparison); web: cdp. Leave unset to take each platform's default.",
 		// Empty means "not chosen" — each platform then picks its default
-		// (Android: devicelab, iOS: wda, web: cdp). Do not set a value here, or
+		// (Android: devicelab, iOS: devicelab, web: cdp). Do not set a value here, or
 		// it would leak in as an explicit choice on every platform.
 		Value:   "",
 		EnvVars: []string{"MAESTRO_DRIVER"},

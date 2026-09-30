@@ -1137,16 +1137,19 @@ func TestResolveDriverName(t *testing.T) {
 		expected string
 	}{
 		{"default android", "", "android", "devicelab"},
-		{"default ios", "", "ios", "wda"},
+		{"default ios", "", "ios", "devicelab"},
+		{"explicit wda ios", "wda", "ios", "wda"},
+		{"explicit devicelab-legacy ios", "devicelab-legacy", "ios", "devicelab-legacy"},
 		{"explicit uiautomator2 android", "uiautomator2", "android", "uiautomator2"},
-		{"explicit uiautomator2 ios overrides to wda", "uiautomator2", "ios", "wda"},
+		{"explicit uiautomator2 ios falls back to the ios default", "uiautomator2", "ios", "devicelab"},
 		{"appium android", "appium", "android", "appium"},
 		{"appium ios", "appium", "ios", "appium"},
 		{"mock platform", "", "mock", "mock"},
 		{"web default", "", "web", "cdp"},
 		{"web explicit driver", "custom", "web", "custom"},
 		{"case insensitive web", "", "Web", "cdp"},
-		{"case insensitive ios", "", "iOS", "wda"},
+		{"case insensitive ios", "", "iOS", "devicelab"},
+		{"case insensitive wda", "WDA", "ios", "wda"},
 		{"case insensitive appium", "Appium", "android", "appium"},
 		{"empty both", "", "", "devicelab"},
 	}

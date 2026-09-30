@@ -10,7 +10,7 @@ import (
 	"github.com/devicelab-dev/maestro-runner/pkg/flutter"
 )
 
-// createDevicelabIOSDriver constructs the iOS driver for --driver devicelab:
+// createDevicelabIOSDriver constructs the default iOS driver (--driver devicelab):
 // the prebuilt devicelab-ios-agent (drivers/ios/devicelab-ios-agent/) on a
 // booted simulator. The agent stays up between runs; a later run re-attaches
 // to it instead of starting it again. A physical iPhone goes to
@@ -27,7 +27,7 @@ func createDevicelabIOSDriver(cfg *RunConfig) (core.Driver, func(), error) {
 				printSetupSuccess(fmt.Sprintf("Found device: %s", dev))
 				return createDevicelabIOSDeviceDriver(cfg, dev)
 			}
-			return nil, nil, fmt.Errorf("--driver devicelab on iOS needs a booted simulator or a connected iPhone")
+			return nil, nil, fmt.Errorf("no iOS device found: boot a simulator or connect an iPhone (--driver devicelab, the iOS default)")
 		}
 		printSetupSuccess(fmt.Sprintf("Found simulator: %s", udid))
 	}

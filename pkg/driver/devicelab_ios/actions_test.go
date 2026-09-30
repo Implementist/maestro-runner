@@ -389,8 +389,9 @@ func TestHideKeyboard(t *testing.T) {
 	d, _, _ := newTestDriver(t, func(cmd string, _ Args) (*Response, error) {
 		return ok(&Payload{Visible: visible}), nil
 	})
-	if res := d.Execute(&flow.HideKeyboardStep{}); res.Success {
-		t.Fatal("keyboard still up should fail")
+	// A keyboard that stays up is not an error, as in Maestro.
+	if res := d.Execute(&flow.HideKeyboardStep{}); !res.Success {
+		t.Fatalf("keyboard still up should pass, as in Maestro: %s", res.Message)
 	}
 	visible = false
 	if res := d.Execute(&flow.HideKeyboardStep{}); !res.Success {
@@ -547,6 +548,42 @@ func TestInputTextRetapsWhenNothingHasFocus(t *testing.T) {
 	d2, _, _ := newTestDriver(t, handler)
 	if r := d2.Execute(&flow.InputTextStep{Text: "a"}); r.Success {
 		t.Error("inputText with nothing focused and no previous tap should fail")
+	}
+}
+
+// "tapOn field, eraseText, inputText": the erase taps nothing, so inputText
+// still re-taps the field when it never took focus. A real iPhone left the
+// search field unfocused after the tap and the flow failed with NO_FOCUS.
+func TestInputTextRetapsAfterEraseText(t *testing.T) {
+	field := node(1, "searchField", "Search", 20, 100, 360, 44)
+	typed := 0
+	handler := func(cmd string, a Args) (*Response, error) {
+		switch cmd {
+		case "find", "snapshot":
+			return tree(field), nil
+		case "type":
+			if a.Erase > 0 {
+				return ok(&Payload{}), nil
+			}
+			typed++
+			if typed == 1 {
+				return nil, &AgentError{Code: "NO_FOCUS", Message: "no field has keyboard focus"}
+			}
+		}
+		return ok(&Payload{}), nil
+	}
+	d, f, _ := newTestDriver(t, handler)
+	if r := d.Execute(&flow.TapOnStep{Selector: flow.Selector{Text: "Search"}}); !r.Success {
+		t.Fatalf("tap failed: %s", r.Message)
+	}
+	if r := d.Execute(&flow.EraseTextStep{Characters: 10}); !r.Success {
+		t.Fatalf("eraseText failed: %s", r.Message)
+	}
+	if r := d.Execute(&flow.InputTextStep{Text: "appium"}); !r.Success {
+		t.Fatalf("inputText failed: %s", r.Message)
+	}
+	if got := len(f.sent("act")); got != 2 {
+		t.Errorf("taps = %d, want 2 (the step's tap and one re-tap)", got)
 	}
 }
 

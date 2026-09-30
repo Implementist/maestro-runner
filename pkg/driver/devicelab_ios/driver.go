@@ -269,7 +269,12 @@ func (d *Driver) Execute(step flow.Step) *core.CommandResult {
 	// between "tapOn field" and "inputText" keeps the tap point.
 	if actsOnScreen(step) || movesScreen(step) {
 		d.screenMayMove = movesScreen(step)
-		d.prevTap, d.lastTap = d.lastTap, nil
+		// eraseText types into the tapped field and taps nothing itself, so
+		// "tapOn field, eraseText, inputText" keeps the tap point for the
+		// re-tap when the field never took focus (seen on a real iPhone).
+		if _, erase := step.(*flow.EraseTextStep); !erase {
+			d.prevTap, d.lastTap = d.lastTap, nil
+		}
 	}
 	result := d.execute(step)
 	if result == nil {

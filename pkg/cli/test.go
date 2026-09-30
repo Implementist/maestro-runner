@@ -278,9 +278,7 @@ func resolveDriverName(cfg *RunConfig, platform string) string {
 			driverName = "cdp"
 		}
 	case "ios":
-		if driverName == "" || driverName == "uiautomator2" {
-			driverName = "wda"
-		}
+		driverName = iosDriverName(driverName)
 	case "mock":
 		driverName = "mock"
 	default: // android or empty
@@ -964,7 +962,7 @@ func executeTest(cfg *RunConfig) error {
 		warnUnsupportedSelectors(flows, cfg.Platform)
 	}
 
-	// Pre-checks for iOS with direct WDA driver (not Appium).
+	// Pre-checks for iOS with a direct driver (DeviceLab or WDA, not Appium).
 	// Appium handles everything via capabilities — no --app-file or --team-id needed.
 	if strings.EqualFold(cfg.Platform, "ios") && cfg.Driver != "appium" {
 		// team-id is only required for real devices, not simulators.

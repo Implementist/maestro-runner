@@ -196,10 +196,11 @@ func isChecked(n Node) bool {
 // matches containing no other match (the deepest), then tree order.
 func deepest(matches []Node, sel flow.Selector) []Node {
 	type ranked struct {
-		n     Node
-		exact bool
-		outer bool
-		pos   int
+		n       Node
+		exact   bool
+		outer   bool
+		control bool
+		pos     int
 	}
 	rs := make([]ranked, len(matches))
 	for i, m := range matches {
@@ -208,6 +209,7 @@ func deepest(matches []Node, sel flow.Selector) []Node {
 			rs[i].exact = core.MatchSelectorTextExactCase(sel.Text, texts(m)...)
 		}
 		rs[i].outer = containsOther(matches, i)
+		rs[i].control = isControl(m.Type)
 	}
 	sort.SliceStable(rs, func(a, b int) bool {
 		if rs[a].exact != rs[b].exact {
@@ -216,6 +218,14 @@ func deepest(matches []Node, sel flow.Selector) []Node {
 		if rs[a].outer != rs[b].outer {
 			return !rs[a].outer
 		}
+		// Of siblings that match alike, a control comes before an image or
+		// a label: TestHive's search icon and its text field share the id
+		// "search-bar", the icon comes first, and a tap on it never focused
+		// the field. WDA takes the first match XCUITest reports displayed,
+		// which is the field.
+		if rs[a].control != rs[b].control {
+			return rs[a].control
+		}
 		return rs[a].pos < rs[b].pos
 	})
 	out := make([]Node, len(rs))
@@ -223,6 +233,17 @@ func deepest(matches []Node, sel flow.Selector) []Node {
 		out[i] = r.n
 	}
 	return out
+}
+
+// isControl reports whether an element type is one a user acts on: a field,
+// a button or another control, as opposed to an image, a label or a container.
+func isControl(t string) bool {
+	switch strings.TrimPrefix(t, "XCUIElementType") {
+	case "TextField", "SecureTextField", "SearchField", "TextView", "Button", "Switch", "Toggle",
+		"Link", "Slider", "Stepper", "SegmentedControl", "Picker", "PickerWheel", "DatePicker":
+		return true
+	}
+	return false
 }
 
 func contains(outer, inner Node) bool {
