@@ -35,14 +35,13 @@ func TestBuildSelectors_IDAndTextAreANDed(t *testing.T) {
 	}
 }
 
-// The single-attribute paths are unchanged: given only one of the two, the
-// builder still emits the queries it always did.
+// The single-attribute paths constrain only their own attribute.
 func TestBuildSelectors_SingleAttributeUnchanged(t *testing.T) {
 	idOnly, err := buildSelectors(flow.Selector{ID: "boss.hp"}, 5000)
 	if err != nil {
 		t.Fatalf("buildSelectors failed: %v", err)
 	}
-	// Exact resourceId, then the substring fallback.
+	// Exact resourceId, then the whole-id match with or without the prefix.
 	if len(idOnly) != 2 {
 		t.Errorf("expected 2 id strategies, got %d", len(idOnly))
 	}
@@ -56,10 +55,11 @@ func TestBuildSelectors_SingleAttributeUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildSelectors failed: %v", err)
 	}
-	// text/description/hint matched whole, then containing it, then the
-	// same three case-insensitively.
-	if len(textOnly) != 9 {
-		t.Errorf("expected 9 text strategies, got %d", len(textOnly))
+	// text/description equal to it, then text/description/hint matching it
+	// whole ignoring case. Plain text has no own-case regex tier: it would
+	// repeat the first.
+	if len(textOnly) != 5 {
+		t.Errorf("expected 5 text strategies, got %d", len(textOnly))
 	}
 	for _, s := range textOnly {
 		if strings.Contains(s.Value, "resourceId") {
@@ -78,77 +78,90 @@ func TestBuildSelectorsForTap_CombinedKeepsClickableFirst(t *testing.T) {
 	if len(strategies) == 0 {
 		t.Fatal("expected at least one strategy")
 	}
-	if !strings.Contains(strategies[0].Value, "clickable(true)") {
-		t.Errorf("expected a clickable-first strategy, got: %s", strategies[0].Value)
-	}
-	if !strings.Contains(strategies[0].Value, "resourceId") ||
-		!strings.Contains(strategies[0].Value, `textMatches("(?is)\Q7 misses\E")`) {
-		t.Errorf("clickable strategy must still carry both id and text, got: %s", strategies[0].Value)
+	if want := `new UiSelector().resourceId("boss.hp").text("7 misses").clickable(true)`; strategies[0].Value != want {
+		t.Errorf("first strategy = %s, want %s", strategies[0].Value, want)
 	}
 }
 
-// A plain text selector tries the whole text before a substring, and a tap
-// tries every whole-text strategy, clickable or not, before any substring
-// one: an address bar showing ".../registration-username" must not beat the
-// form label that is exactly "Username".
-func TestTapStrategies_ExactTextFirst(t *testing.T) {
-	clickable, err := buildClickableOnlyStrategies(flow.Selector{Text: "Username"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	all, err := buildSelectors(flow.Selector{Text: "Username"}, 5000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	strategies := exactTextFirst(append(clickable, all...))
-	sawSubstring := false
-	exactCount := 0
-	for _, s := range strategies {
-		if isExactTextStrategy(s) {
-			exactCount++
-			if sawSubstring {
-				t.Fatalf("whole-text strategy after a substring one: %s", s.Value)
+// Every Android query matches the whole text, description or hint, as
+// Maestro does (#188): `tapOn: Open` must not reach a "Talk · Open" row
+// through textContains, and a tap is no longer reordered to put whole-text
+// strategies ahead of substring ones, as there are none.
+func TestTextStrategiesMatchWhole(t *testing.T) {
+	for _, text := range []string{"Open", "English", "DDG.", "Username"} {
+		clickable, err := buildClickableOnlyStrategies(flow.Selector{Text: text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		all, err := buildSelectors(flow.Selector{Text: text}, 5000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range append(clickable, all...) {
+			if strings.Contains(s.Value, "Contains(") || strings.Contains(s.Value, ".*") || strings.Contains(s.Value, `\Q`) {
+				t.Errorf("%q got a partial strategy: %s", text, s.Value)
 			}
-		} else {
-			sawSubstring = true
 		}
-	}
-	if exactCount != 6 {
-		t.Errorf("expected 6 whole-text strategies (3 clickable, 3 any), got %d", exactCount)
-	}
-	if !strings.Contains(strategies[0].Value, `textMatches("(?is)\QUsername\E").clickable(true)`) {
-		t.Errorf("first strategy should be the clickable whole-text match, got %s", strategies[0].Value)
 	}
 
-	// A regex selector keeps its own whole-match patterns only.
-	regex, _ := buildSelectors(flow.Selector{Text: "Passwords.*"}, 5000)
+	clickable, _ := buildClickableOnlyStrategies(flow.Selector{Text: "Username"})
+	if want := `new UiSelector().text("Username").clickable(true)`; clickable[0].Value != want {
+		t.Errorf("first clickable strategy = %s, want %s", clickable[0].Value, want)
+	}
+	last := clickable[len(clickable)-1].Value
+	if want := `new UiSelector().hintMatches("(?ims)(?:Username)").clickable(true)`; last != want {
+		t.Errorf("last clickable strategy = %s, want %s", last, want)
+	}
+
+	// A partial match written as a regex passes through, whole-matched.
+	regex, _ := buildSelectors(flow.Selector{Text: ".*Open.*"}, 5000)
+	found := false
 	for _, s := range regex {
-		if isExactTextStrategy(s) {
-			t.Errorf("regex selector got a literal whole-text strategy: %s", s.Value)
+		if s.Value == `new UiSelector().textMatches("(?ims)(?:.*Open.*)")` {
+			found = true
 		}
+	}
+	if !found {
+		t.Errorf("no case-insensitive regex strategy for .*Open.* in %v", regex)
 	}
 }
 
-// A dotted text selector gets only whole-string regex strategies: no
-// substring, no literal match, so "DDG." cannot land on "Not DDG.".
+// A dotted text selector is a regex to Maestro: its dot matches any
+// character, and in its own case first (#151).
 func TestDottedTextStrategies(t *testing.T) {
-	all, err := buildSelectors(flow.Selector{Text: "DDG."}, 5000)
-	if err != nil {
-		t.Fatal(err)
-	}
 	clickable, err := buildClickableOnlyStrategies(flow.Selector{Text: "DDG."})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range append(all, clickable...) {
-		if strings.Contains(s.Value, "Contains(") || strings.Contains(s.Value, `\Q`) {
-			t.Errorf("dotted selector got a substring/literal strategy: %s", s.Value)
-		}
-		if !strings.Contains(s.Value, `Matches("(?s)DDG.")`) && !strings.Contains(s.Value, `Matches("(?is)DDG.")`) {
-			t.Errorf("unexpected strategy: %s", s.Value)
+	want := []string{
+		`new UiSelector().text("DDG.").clickable(true)`,
+		`new UiSelector().description("DDG.").clickable(true)`,
+		`new UiSelector().textMatches("(?ms)(?:DDG.)").clickable(true)`,
+		`new UiSelector().descriptionMatches("(?ms)(?:DDG.)").clickable(true)`,
+		`new UiSelector().hintMatches("(?ms)(?:DDG.)").clickable(true)`,
+		`new UiSelector().textMatches("(?ims)(?:DDG.)").clickable(true)`,
+		`new UiSelector().descriptionMatches("(?ims)(?:DDG.)").clickable(true)`,
+		`new UiSelector().hintMatches("(?ims)(?:DDG.)").clickable(true)`,
+	}
+	if len(clickable) != len(want) {
+		t.Fatalf("clickable strategies = %d, want %d: %v", len(clickable), len(want), clickable)
+	}
+	for i, s := range clickable {
+		if s.Value != want[i] {
+			t.Errorf("strategy %d = %s, want %s", i, s.Value, want[i])
 		}
 	}
-	if len(clickable) != 6 {
-		t.Errorf("clickable strategies = %d, want 6", len(clickable))
+}
+
+// An id matches whole (#188): `id: login` must not find "login_button".
+func TestIDStrategiesMatchWhole(t *testing.T) {
+	strategies, _ := buildSelectors(flow.Selector{ID: "login"}, 5000)
+	for _, s := range strategies {
+		if strings.Contains(s.Value, ".*(?:login).*") {
+			t.Errorf("id got a substring strategy: %s", s.Value)
+		}
+	}
+	if want := `new UiSelector().resourceIdMatches("(?ims)(?:.*/)?(?:login)")`; strategies[len(strategies)-1].Value != want {
+		t.Errorf("last id strategy = %s, want %s", strategies[len(strategies)-1].Value, want)
 	}
 }

@@ -1096,24 +1096,11 @@ func (d *Driver) findElementDirectWithContext(ctx context.Context, sel flow.Sele
 	allStrategies, _ := buildSelectors(sel, 0)
 	combined := append(clickableStrategies, allStrategies...)
 
-	// When text triggers regex detection, also add literal textMatches
-	// as fallback. Handles false positives like "alice@example.com (locked out)" where
-	// parentheses trigger regex detection but the text is actually literal.
-	if looksLikeRegex(sel.Text) {
-		escaped := escapeUIAutomatorString(sel.Text)
-		stateFilters := buildStateFilters(sel)
-		pattern := `(?is).*\Q` + escaped + `\E.*`
-		combined = append(combined,
-			LocatorStrategy{
-				Strategy: uiautomator2.StrategyUIAutomator,
-				Value:    `new UiSelector().textMatches("` + pattern + `")` + stateFilters,
-			},
-			LocatorStrategy{
-				Strategy: uiautomator2.StrategyUIAutomator,
-				Value:    `new UiSelector().descriptionMatches("` + pattern + `")` + stateFilters,
-			},
-		)
-	}
+	// Text such as "alice@example.com (locked out)" reads as a regex whose
+	// parentheses group, so it matches only the text without them; the
+	// exact .text() tier finds it as written, as Maestro's literal fallback
+	// does. The contains pass that used to follow here matched any element
+	// holding the text (#188).
 
 	var lastErr error
 	for {
@@ -1156,70 +1143,24 @@ func (d *Driver) findElementDirectWithContext(ctx context.Context, sel flow.Sele
 }
 
 // buildClickableOnlyStrategies builds UiAutomator strategies that only match clickable elements.
+//
+// Every query matches the whole text, description or hint, as Maestro does
+// (core.UiSelectorTextTiers): the value equal to the selector first, then the
+// selector as a regex in its own case, then ignoring case. The substring
+// passes that used to follow tapped a clickable "Talk · Open" row for
+// `tapOn: Open` (#188); a partial match is written `.*Open.*`. hintMatches is
+// a DeviceLab-agent extension, so "tapOn: 'Email'" finds an empty field by
+// its hint.
 func buildClickableOnlyStrategies(sel flow.Selector) ([]LocatorStrategy, error) {
 	var strategies []LocatorStrategy
-	stateFilters := buildStateFilters(sel)
-
-	if sel.Text != "" {
-		escaped := escapeUIAutomatorString(sel.Text)
-		// The whole text first, as Maestro matches it, then case-sensitive
-		// text/description/hint containing it, then a case-insensitive
-		// fallback. The substring passes stay for tab labels with counts
-		// ("Inbox" for "Inbox (3)"); they only run when nothing matches whole.
-		// hintContains is a DeviceLab-agent extension — matches EditText android:hint
-		// placeholder so "tapOn: 'Email'" finds an empty field by its hint text.
-		strategies = append(strategies, exactTextStrategies(sel.Text, ".clickable(true)"+stateFilters)...)
-		strategies = append(strategies, LocatorStrategy{
-			Strategy: uiautomator2.StrategyUIAutomator,
-			Value:    `new UiSelector().textContains("` + escaped + `").clickable(true)` + stateFilters,
-		})
-		strategies = append(strategies, LocatorStrategy{
-			Strategy: uiautomator2.StrategyUIAutomator,
-			Value:    `new UiSelector().descriptionContains("` + escaped + `").clickable(true)` + stateFilters,
-		})
-		strategies = append(strategies, LocatorStrategy{
-			Strategy: uiautomator2.StrategyUIAutomator,
-			Value:    `new UiSelector().hintContains("` + escaped + `").clickable(true)` + stateFilters,
-		})
-		ciPattern := `(?is).*\Q` + escaped + `\E.*`
-		strategies = append(strategies, LocatorStrategy{
-			Strategy: uiautomator2.StrategyUIAutomator,
-			Value:    `new UiSelector().textMatches("` + ciPattern + `").clickable(true)` + stateFilters,
-		})
-		strategies = append(strategies, LocatorStrategy{
-			Strategy: uiautomator2.StrategyUIAutomator,
-			Value:    `new UiSelector().descriptionMatches("` + ciPattern + `").clickable(true)` + stateFilters,
-		})
-		strategies = append(strategies, LocatorStrategy{
-			Strategy: uiautomator2.StrategyUIAutomator,
-			Value:    `new UiSelector().hintMatches("` + ciPattern + `").clickable(true)` + stateFilters,
-		})
-		// Fall back to regex match (case-insensitive) for partial/pattern matches.
-		// looksLikeRegex(text) was true → text IS a regex. Pass it through
-		// unmodified (only escape Java-string quotes); do NOT escape regex
-		// metachars, or `.*For You.*` becomes `\.\*For You\.\*` which matches
-		// the literal string ".*For You.*" instead of "anything around For You".
-		if looksLikeRegex(sel.Text) {
-			regexEscaped := escapeUIAutomatorString(sel.Text)
-			// Case as written first, then ignoring case, as Maestro matches
-			// (IGNORE_CASE): the ignore-case pass finds "Let's get started!"
-			// for `(let's get started!|...)`, and the first pass still prefers
-			// "SIGN OUT" over "Sign out" for `^SIGN OUT$` (#151).
-			for _, pattern := range []string{"(?s)" + regexEscaped, "(?is)" + regexEscaped} {
-				strategies = append(strategies, LocatorStrategy{
-					Strategy: uiautomator2.StrategyUIAutomator,
-					Value:    `new UiSelector().textMatches("` + pattern + `").clickable(true)` + stateFilters,
-				})
-				strategies = append(strategies, LocatorStrategy{
-					Strategy: uiautomator2.StrategyUIAutomator,
-					Value:    `new UiSelector().descriptionMatches("` + pattern + `").clickable(true)` + stateFilters,
-				})
-			}
+	filters := ".clickable(true)" + buildStateFilters(sel)
+	for _, tier := range core.UiSelectorTextTiers(sel.Text, true) {
+		for _, body := range tier {
+			strategies = append(strategies, LocatorStrategy{
+				Strategy: uiautomator2.StrategyUIAutomator,
+				Value:    `new UiSelector()` + body + filters,
+			})
 		}
-	}
-
-	if isDottedText(sel.Text) {
-		strategies = dottedTextStrategies(sel.Text, ".clickable(true)"+stateFilters)
 	}
 
 	if len(strategies) == 0 {
@@ -1897,80 +1838,22 @@ func buildSelectorsWithOptions(sel flow.Selector, timeoutMs int, preferClickable
 		}
 	}
 
-	// ID — exact match FIRST, substring fallback ONLY if exact fails. Mirrors
-	// the parallel fix in pkg/driver/uiautomator2: substring-only
-	// `resourceIdMatches(".*X.*")` triggered internal scrolling and returned a
-	// wrong element when the target id wasn't in the rendered tree (lazy
-	// ListView with target offscreen).
-	var idTiers [][]string
-	if sel.ID != "" {
-		escaped := escapeUIAutomatorString(sel.ID)
-		idTiers = [][]string{
-			{`.resourceId("` + escaped + `")`},
-			// Grouped, so an id written as a regex alternation
-			// ("omnibarTextInput|inputField") keeps both alternatives inside
-			// the wildcards. Ungrouped, `|` split the whole pattern into
-			// ".*omnibarTextInput" or "inputField.*", and neither matched a
-			// full resource id like "com.app:id/inputField".
-			{`.resourceIdMatches("(?i).*(?:` + escaped + `).*")`},
-		}
-		// An anchored id (^x$) cannot match a full "com.app:id/x" inside
-		// wildcards; Maestro also matches the part after the last "/".
-		if core, ok := unanchored(sel.ID); ok {
-			idTiers = append(idTiers, []string{`.resourceIdMatches("(?i)(?:.*/)?(?:` + escapeUIAutomatorString(core) + `)")`})
-		}
-	}
+	// ID — the exact id FIRST, then Maestro's whole match (ignoring case, with
+	// or without the package prefix) only if that fails. Mirrors the parallel
+	// fix in pkg/driver/uiautomator2: a resourceIdMatches that finds nothing
+	// rendered can trigger internal scrolling and return a wrong element (lazy
+	// ListView with target offscreen). The match used to be `.*X.*`, so
+	// `id: login` found "login_button" (#188).
+	idTiers := core.UiSelectorIDTiers(sel.ID)
 
-	// Text — case-sensitive first, case-insensitive fallback. hintContains /
-	// hintMatches are DeviceLab-agent extensions: they match the EditText
-	// android:hint placeholder, so "tapOn: 'Email'" finds an empty field by
-	// hint.
-	var textTiers [][]string
-	if sel.Text != "" {
-		escaped := escapeUIAutomatorString(sel.Text)
-		ciPattern := `(?is).*\Q` + escaped + `\E.*`
-		if !looksLikeRegex(sel.Text) {
-			exact := `(?is)\Q` + escaped + `\E`
-			textTiers = append(textTiers, []string{
-				`.textMatches("` + exact + `")`,
-				`.descriptionMatches("` + exact + `")`,
-				`.hintMatches("` + exact + `")`,
-			})
-		}
-		textTiers = append(textTiers, [][]string{
-			{
-				`.textContains("` + escaped + `")`,
-				`.descriptionContains("` + escaped + `")`,
-				`.hintContains("` + escaped + `")`,
-			},
-			{
-				`.textMatches("` + ciPattern + `")`,
-				`.descriptionMatches("` + ciPattern + `")`,
-				`.hintMatches("` + ciPattern + `")`,
-			},
-		}...)
-		// Text is already a regex per looksLikeRegex — use it as-is; only
-		// escape Java-string quotes. Escaping regex metachars here would defeat
-		// the regex (turns `.*` into `\.\*`, matching the literal ".*").
-		if looksLikeRegex(sel.Text) {
-			// Case as written first, then ignoring case, as Maestro matches
-			// (IGNORE_CASE): the ignore-case pass finds "Let's get started!"
-			// for `(let's get started!|...)`, and the first pass still prefers
-			// "SIGN OUT" over "Sign out" for `^SIGN OUT$` (#151).
-			pattern := escapeUIAutomatorString(sel.Text)
-			textTiers = append(textTiers,
-				[]string{`.textMatches("(?s)` + pattern + `")`, `.descriptionMatches("(?s)` + pattern + `")`, `.hintMatches("(?s)` + pattern + `")`},
-				[]string{`.textMatches("(?is)` + pattern + `")`, `.descriptionMatches("(?is)` + pattern + `")`, `.hintMatches("(?is)` + pattern + `")`},
-			)
-		}
-	}
-	if isDottedText(sel.Text) {
-		p := escapeUIAutomatorString(sel.Text)
-		textTiers = [][]string{
-			{`.textMatches("(?s)` + p + `")`, `.descriptionMatches("(?s)` + p + `")`, `.hintMatches("(?s)` + p + `")`},
-			{`.textMatches("(?is)` + p + `")`, `.descriptionMatches("(?is)` + p + `")`, `.hintMatches("(?is)` + p + `")`},
-		}
-	}
+	// Text — every query matches the whole text, description or hint, as
+	// Maestro does: exactly as written first, then as a regex in the
+	// selector's own case, then ignoring case (core.UiSelectorTextTiers). The
+	// contains passes that used to follow matched "Talk · Open" for "Open"
+	// (#188). hintMatches is a DeviceLab-agent extension: it matches the
+	// EditText android:hint placeholder, so "tapOn: 'Email'" finds an empty
+	// field by hint.
+	textTiers := core.UiSelectorTextTiers(sel.Text, true)
 
 	// A selector naming both must match one element carrying both. Emitting the
 	// id-only and text-only queries as separate candidates made them an OR: the
@@ -2010,70 +1893,6 @@ func buildSelectorsWithOptions(sel flow.Selector, timeoutMs int, preferClickable
 	}
 
 	return strategies, nil
-}
-
-// isDottedText reports a text selector with a dot but no other regex syntax.
-// Maestro compiles every text selector as a regex, so its dots match any
-// character and the whole text has to match: "DDG." is not found in
-// "Not DDG.". Such selectors skip the substring fallback plain text gets.
-func isDottedText(text string) bool {
-	return text != "" && !looksLikeRegex(text) && strings.Contains(text, ".")
-}
-
-// dottedTextStrategies matches a dotted text selector whole against text,
-// description or hint: as written first, then ignoring case.
-func dottedTextStrategies(text, filters string) []LocatorStrategy {
-	p := escapeUIAutomatorString(text)
-	var out []LocatorStrategy
-	for _, flags := range []string{"(?s)", "(?is)"} {
-		for _, attr := range []string{"textMatches", "descriptionMatches", "hintMatches"} {
-			out = append(out, LocatorStrategy{
-				Strategy: uiautomator2.StrategyUIAutomator,
-				Value:    `new UiSelector().` + attr + `("` + flags + p + `")` + filters,
-			})
-		}
-	}
-	return out
-}
-
-// exactTextStrategies matches a plain text selector against the whole text,
-// description or hint, ignoring case, as Maestro does. A regex selector gets
-// none: its own patterns already match whole.
-func exactTextStrategies(text, filters string) []LocatorStrategy {
-	if looksLikeRegex(text) {
-		return nil
-	}
-	exact := `(?is)\Q` + escapeUIAutomatorString(text) + `\E`
-	var out []LocatorStrategy
-	for _, attr := range []string{"textMatches", "descriptionMatches", "hintMatches"} {
-		out = append(out, LocatorStrategy{
-			Strategy: uiautomator2.StrategyUIAutomator,
-			Value:    `new UiSelector().` + attr + `("` + exact + `")` + filters,
-		})
-	}
-	return out
-}
-
-// isExactTextStrategy reports whether s is one of exactTextStrategies.
-func isExactTextStrategy(s LocatorStrategy) bool {
-	return strings.Contains(s.Value, `Matches("(?is)\Q`) && !strings.Contains(s.Value, `\E.*"`)
-}
-
-// exactTextFirst moves the whole-text strategies ahead of the rest, keeping
-// each group's order. A tap tries the clickable list and then the full one;
-// without this, a clickable element merely containing the text (an address
-// bar showing ".../registration-username") beat the element that is exactly
-// "Username".
-func exactTextFirst(strategies []LocatorStrategy) []LocatorStrategy {
-	var exact, rest []LocatorStrategy
-	for _, s := range strategies {
-		if isExactTextStrategy(s) {
-			exact = append(exact, s)
-		} else {
-			rest = append(rest, s)
-		}
-	}
-	return append(exact, rest...)
 }
 
 // looksLikeRegex checks if text contains regex metacharacters.
@@ -2293,17 +2112,4 @@ func (d *Driver) findVisible(sel flow.Selector, optional bool, stepTimeoutMs int
 		}
 	}
 	return nil, err
-}
-
-// unanchored strips a leading ^ and a trailing unescaped $ from an id regex,
-// reporting whether it had either.
-func unanchored(id string) (string, bool) {
-	core, anchored := id, false
-	if strings.HasPrefix(core, "^") {
-		core, anchored = core[1:], true
-	}
-	if strings.HasSuffix(core, "$") && !strings.HasSuffix(core, `\$`) {
-		core, anchored = core[:len(core)-1], true
-	}
-	return core, anchored
 }

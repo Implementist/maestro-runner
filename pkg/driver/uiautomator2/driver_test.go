@@ -239,59 +239,75 @@ func (m *MockShellExecutor) Screenshot() ([]byte, error) {
 // ============================================================================
 
 func TestBuildSelectorsText(t *testing.T) {
-	// Literal text: textContains first, then case-insensitive textMatches fallback
+	// Plain text matches a whole value, as Maestro does (#188): the text or
+	// description equal to it, then either matching it whole ignoring case.
+	// It used to be textContains, which found "Talk · Open" for "Open".
 	sel := flow.Selector{Text: "Login"}
 	strategies, err := buildSelectors(sel, 5000)
 	if err != nil {
 		t.Fatalf("buildSelectors failed: %v", err)
 	}
 
-	// Should have 4 strategies: textContains, descriptionContains, textMatches(ci), descriptionMatches(ci)
-	if len(strategies) != 4 {
-		t.Errorf("expected 4 strategies, got %d", len(strategies))
+	want := []string{
+		`new UiSelector().text("Login")`,
+		`new UiSelector().description("Login")`,
+		`new UiSelector().textMatches("(?ims)(?:Login)")`,
+		`new UiSelector().descriptionMatches("(?ims)(?:Login)")`,
 	}
-
-	// First should be case-sensitive textContains (preserves existing behavior)
-	s := strategies[0]
-	if !strings.Contains(s.Value, "textContains") {
-		t.Errorf("expected textContains as first strategy, got: %s", s.Value)
+	if len(strategies) != len(want) {
+		t.Fatalf("expected %d strategies, got %d", len(want), len(strategies))
 	}
-
-	// Third should be case-insensitive textMatches fallback
-	s = strategies[2]
-	if !strings.Contains(s.Value, "textMatches") {
-		t.Errorf("expected textMatches as fallback, got: %s", s.Value)
+	for i, w := range want {
+		if strategies[i].Value != w {
+			t.Errorf("strategy %d = %s, want %s", i, strategies[i].Value, w)
+		}
 	}
-	if !strings.Contains(s.Value, `\QLogin\E`) {
-		t.Errorf("expected \\QLogin\\E in fallback, got: %s", s.Value)
+	for _, s := range strategies {
+		if strings.Contains(s.Value, "Contains(") {
+			t.Errorf("plain text must not match a substring: %s", s.Value)
+		}
 	}
 }
 
 func TestBuildSelectorsTextWithPeriod(t *testing.T) {
-	// Text with period: textContains first, then textMatches with \Q\E fallback
+	// A period is a regex dot to Maestro, matching any character, but the
+	// text equal to the selector comes first and the whole value must match.
 	sel := flow.Selector{Text: "Join mastodon.social"}
 	strategies, err := buildSelectors(sel, 5000)
 	if err != nil {
 		t.Fatalf("buildSelectors failed: %v", err)
 	}
 
-	if len(strategies) != 4 {
-		t.Errorf("expected 4 strategies, got %d", len(strategies))
+	// equal (text, description), own case (text, description), ignoring case.
+	if len(strategies) != 6 {
+		t.Errorf("expected 6 strategies, got %d", len(strategies))
 	}
+	if want := `new UiSelector().text("Join mastodon.social")`; strategies[0].Value != want {
+		t.Errorf("first strategy = %s, want %s", strategies[0].Value, want)
+	}
+	if want := `new UiSelector().textMatches("(?ims)(?:Join mastodon.social)")`; strategies[4].Value != want {
+		t.Errorf("ignore-case strategy = %s, want %s", strategies[4].Value, want)
+	}
+}
 
-	// First: case-sensitive textContains
-	s := strategies[0]
-	if !strings.Contains(s.Value, "textContains") {
-		t.Errorf("expected textContains first, got: %s", s.Value)
+// The #188 report: `tapOn: Open` tapped a clickable "Talk · Open" row through
+// textContains. No tap strategy may match part of a value.
+func TestTapStrategiesMatchWhole(t *testing.T) {
+	for _, text := range []string{"Open", "English", "Jawy"} {
+		clickable, err := buildClickableOnlyStrategies(flow.Selector{Text: text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tap, _ := buildSelectorsForTap(flow.Selector{Text: text}, 0)
+		for _, s := range append(clickable, tap...) {
+			if strings.Contains(s.Value, "Contains(") || strings.Contains(s.Value, ".*") || strings.Contains(s.Value, `\Q`) {
+				t.Errorf("%q got a partial strategy: %s", text, s.Value)
+			}
+		}
 	}
-	if !strings.Contains(s.Value, "mastodon.social") {
-		t.Errorf("expected literal text in textContains, got: %s", s.Value)
-	}
-
-	// Third: case-insensitive fallback with \Q\E
-	s = strategies[2]
-	if !strings.Contains(s.Value, `\QJoin mastodon.social\E`) {
-		t.Errorf("expected literal text in \\Q\\E fallback, got: %s", s.Value)
+	regex, _ := buildClickableOnlyStrategies(flow.Selector{Text: ".*Open.*"})
+	if want := `new UiSelector().textMatches("(?ims)(?:.*Open.*)").clickable(true)`; regex[len(regex)-2].Value != want {
+		t.Errorf("regex strategy = %s, want %s", regex[len(regex)-2].Value, want)
 	}
 }
 
@@ -342,28 +358,30 @@ func TestBuildSelectorsRegexPattern(t *testing.T) {
 		t.Fatalf("buildSelectors failed: %v", err)
 	}
 
-	// Four strategies: text and description with the case as written, then
-	// both again ignoring case, as Maestro matches (IGNORE_CASE). The first
-	// pair keeps `^SIGN OUT$` on the "SIGN OUT" button when a "Sign out" row
-	// is also on screen (#151); the second finds `(let's get started!|...)`
-	// against "Let's get started!", which Maestro passes.
-	if len(strategies) != 4 {
-		t.Fatalf("expected 4 strategies, got %d", len(strategies))
+	// Six strategies: text and description equal to the selector (Maestro's
+	// literal fallback), then matching it with the case as written, then
+	// both again ignoring case, as Maestro matches (IGNORE_CASE). The
+	// own-case pair keeps `^SIGN OUT$` on the "SIGN OUT" button when a
+	// "Sign out" row is also on screen (#151); the last finds
+	// `(let's get started!|...)` against "Let's get started!", which Maestro
+	// passes.
+	if len(strategies) != 6 {
+		t.Fatalf("expected 6 strategies, got %d", len(strategies))
 	}
-	for i, want := range []string{"textMatches(\"(?s)", "descriptionMatches(\"(?s)", "textMatches(\"(?is)", "descriptionMatches(\"(?is)"} {
+	for i, want := range []string{`text(".+@.+")`, `description(".+@.+")`,
+		`textMatches("(?ms)(?:.+@.+)")`, `descriptionMatches("(?ms)(?:.+@.+)")`,
+		`textMatches("(?ims)(?:.+@.+)")`, `descriptionMatches("(?ims)(?:.+@.+)")`} {
 		if !strings.Contains(strategies[i].Value, want) {
 			t.Errorf("strategy %d = %s, want it to contain %s", i, strategies[i].Value, want)
-		}
-		if !strings.Contains(strategies[i].Value, ".+@.+") {
-			t.Errorf("strategy %d lost the regex pattern: %s", i, strategies[i].Value)
 		}
 	}
 }
 
 func TestBuildSelectorsID(t *testing.T) {
 	// buildSelectors (non-tap path, preferClickable=false) for an id-only
-	// selector now emits two strategies: exact resourceId first, then
-	// substring resourceIdMatches as fallback.
+	// selector emits two strategies: exact resourceId first, then the whole-id
+	// match with or without the package prefix. The second used to be a
+	// substring match (`.*login_btn.*`), which found "login_btn_2" (#188).
 	sel := flow.Selector{ID: "login_btn"}
 	strategies, err := buildSelectors(sel, 17000)
 	if err != nil {
@@ -371,27 +389,26 @@ func TestBuildSelectorsID(t *testing.T) {
 	}
 
 	if len(strategies) != 2 {
-		t.Fatalf("expected 2 strategies (exact + substring), got %d", len(strategies))
+		t.Fatalf("expected 2 strategies (exact + whole match), got %d", len(strategies))
 	}
 
 	// First strategy must be EXACT match — preventing the silent-wrong-element
-	// bug where lazy-rendered ListView contents tripped the substring scan.
+	// bug where lazy-rendered ListView contents tripped the regex scan.
 	if !strings.Contains(strategies[0].Value, `resourceId("login_btn")`) {
 		t.Errorf("expected exact resourceId first, got: %s", strategies[0].Value)
 	}
 	if strings.Contains(strategies[0].Value, "resourceIdMatches") {
-		t.Errorf("first strategy must not be a substring match, got: %s", strategies[0].Value)
+		t.Errorf("first strategy must not be a regex match, got: %s", strategies[0].Value)
 	}
 
-	// Second strategy is the substring fallback.
-	if !strings.Contains(strategies[1].Value, `resourceIdMatches("(?i).*(?:login_btn).*")`) {
-		t.Errorf("expected substring fallback second, got: %s", strategies[1].Value)
+	if !strings.Contains(strategies[1].Value, `resourceIdMatches("(?ims)(?:.*/)?(?:login_btn)")`) {
+		t.Errorf("expected whole-id match second, got: %s", strategies[1].Value)
 	}
 }
 
 func TestBuildSelectorsForTapID(t *testing.T) {
 	// Tap path (preferClickable=true) for an id-only selector emits four
-	// strategies: exact+clickable, exact, substring+clickable, substring.
+	// strategies: exact+clickable, exact, match+clickable, match.
 	// Order matters — clickable variants of each match level go first so a
 	// tap on a labeled wrapper still prefers the actual button when present.
 	sel := flow.Selector{ID: "login_btn"}
@@ -401,7 +418,7 @@ func TestBuildSelectorsForTapID(t *testing.T) {
 	}
 
 	if len(strategies) != 4 {
-		t.Fatalf("expected 4 strategies (exact+click, exact, substr+click, substr), got %d", len(strategies))
+		t.Fatalf("expected 4 strategies (exact+click, exact, match+click, match), got %d", len(strategies))
 	}
 
 	cases := []struct {
@@ -411,8 +428,8 @@ func TestBuildSelectorsForTapID(t *testing.T) {
 	}{
 		{0, `resourceId("login_btn").clickable(true)`, "resourceIdMatches"},
 		{1, `resourceId("login_btn")`, "resourceIdMatches"},
-		{2, `resourceIdMatches("(?i).*(?:login_btn).*").clickable(true)`, ""},
-		{3, `resourceIdMatches("(?i).*(?:login_btn).*")`, ""},
+		{2, `resourceIdMatches("(?ims)(?:.*/)?(?:login_btn)").clickable(true)`, ""},
+		{3, `resourceIdMatches("(?ims)(?:.*/)?(?:login_btn)")`, ""},
 	}
 	for _, c := range cases {
 		if !strings.Contains(strategies[c.idx].Value, c.want) {
@@ -422,21 +439,11 @@ func TestBuildSelectorsForTapID(t *testing.T) {
 			t.Errorf("strategy[%d] unexpectedly contains %q: %s", c.idx, c.notWant, strategies[c.idx].Value)
 		}
 	}
-
-	// Also verify the exact pair comes before the substring pair — the
-	// load-bearing ordering for the bug fix.
-	exactIdx := strings.Index(strategies[1].Value, `resourceId("login_btn")`)
-	substringIdx := strings.Index(strategies[2].Value, `resourceIdMatches`)
-	if exactIdx < 0 || substringIdx < 0 {
-		t.Fatal("expected pair[1]=exact and pair[2]=substring")
-	}
 }
 
 func TestBuildSelectorsIDRegex(t *testing.T) {
-	// Regex ID pattern — non-regex chars are escaped only for quotes; regex
-	// chars are preserved. Both exact and substring strategies now emit,
-	// but the substring variant (which respects user-supplied regex chars
-	// via resourceIdMatches) is the relevant one for regex IDs.
+	// Regex ID pattern — only quotes are escaped; regex chars are preserved
+	// in the resourceIdMatches strategy.
 	sel := flow.Selector{ID: `item_\d+`}
 	strategies, err := buildSelectors(sel, 5000)
 	if err != nil {
@@ -447,9 +454,8 @@ func TestBuildSelectorsIDRegex(t *testing.T) {
 		t.Fatalf("expected 2 strategies, got %d", len(strategies))
 	}
 
-	// The substring strategy preserves regex metacharacters.
 	if !strings.Contains(strategies[1].Value, "resourceIdMatches") {
-		t.Error("expected resourceIdMatches in substring strategy")
+		t.Error("expected resourceIdMatches in the second strategy")
 	}
 	if !strings.Contains(strategies[1].Value, `\d+`) {
 		t.Errorf("expected regex pattern preserved, got: %s", strategies[1].Value)
@@ -457,20 +463,18 @@ func TestBuildSelectorsIDRegex(t *testing.T) {
 }
 
 func TestBuildSelectorsIDLiteral(t *testing.T) {
-	// Literal ID — substring strategy still wraps with .* for users who
-	// rely on the legacy substring behaviour, but exact is now tried first.
+	// A literal id is no longer wrapped in `.*` (#188): it matches the whole
+	// id, or the part after the package prefix, as Maestro's idMatches does.
 	sel := flow.Selector{ID: "login_btn"}
 	strategies, err := buildSelectors(sel, 5000)
 	if err != nil {
 		t.Fatalf("buildSelectors failed: %v", err)
 	}
 
-	// Substring fallback (index 1) — preserve the .* wrap.
-	if !strings.Contains(strategies[1].Value, `"(?i).*(?:login_btn).*"`) {
-		t.Errorf("literal ID substring fallback should be wrapped with .*, got: %s", strategies[1].Value)
+	if strings.Contains(strategies[1].Value, ".*(?:login_btn).*") {
+		t.Errorf("literal id must not match a substring, got: %s", strategies[1].Value)
 	}
 }
-
 func TestBuildSelectorsWithStateFilters(t *testing.T) {
 	enabled := true
 	checked := false
@@ -3416,16 +3420,18 @@ func TestKeyPressAppliesTypingDelay(t *testing.T) {
 	}
 }
 
-// An id written as a regex alternation keeps both alternatives inside the
-// wildcards. Ungrouped, "omnibarTextInput|inputField" became
-// ".*omnibarTextInput|inputField.*", which matches neither alternative in a
-// full resource id like "com.duckduckgo.mobile.android:id/inputField".
+// An id written as a regex alternation keeps both alternatives grouped.
+// Ungrouped, "omnibarTextInput|inputField" split into alternatives that
+// neither match a full resource id like
+// "com.duckduckgo.mobile.android:id/inputField". The group now follows the
+// optional package prefix rather than sitting inside `.*` wildcards, as ids
+// match whole (#188).
 func TestIDAlternationStaysGrouped(t *testing.T) {
 	strategies, err := buildSelectors(flow.Selector{ID: "omnibarTextInput|inputField"}, 0)
 	if err != nil {
 		t.Fatalf("buildSelectors: %v", err)
 	}
-	want := `resourceIdMatches("(?i).*(?:omnibarTextInput|inputField).*")`
+	want := `resourceIdMatches("(?ims)(?:.*/)?(?:omnibarTextInput|inputField)")`
 	found := false
 	for _, s := range strategies {
 		if strings.Contains(s.Value, want) {

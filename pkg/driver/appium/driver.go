@@ -414,9 +414,11 @@ func (d *Driver) findElementDirect(sel flow.Selector) (*core.ElementInfo, error)
 				// Regex ID: use page source (Appium's UiAutomator calls are slow when element absent)
 				return d.findElementByPageSource(sel)
 			}
-			// Literal ID: use UiAutomator for fast lookup
-			escaped := escapeUIAutomatorString(sel.ID)
-			uiSelector := fmt.Sprintf(`new UiSelector().resourceIdMatches(".*%s.*")`, escaped)
+			// Literal ID: use UiAutomator for fast lookup. The whole id, or
+			// the part after the package prefix, ignoring case, as Maestro's
+			// idMatches; it was `.*id.*`, which found "login_button" for
+			// `id: login` (#188).
+			uiSelector := `new UiSelector().resourceIdMatches("` + escapeUIAutomatorString(core.UiAutomatorIDRegex(sel.ID)) + `")`
 			if elemID, err := d.client.FindElement("-android uiautomator", uiSelector); err == nil && elemID != "" {
 				return d.getElementInfo(elemID)
 			}
@@ -446,67 +448,52 @@ func (d *Driver) findElementDirect(sel flow.Selector) (*core.ElementInfo, error)
 				return nil, fmt.Errorf("element not found: %s", sel.Describe())
 			}
 		} else {
-			// Android: use UiAutomator selectors (much faster than page source)
-			escaped := escapeUIAutomatorString(sel.Text)
+			// Android: use UiAutomator selectors (much faster than page source).
+			// Every query matches the whole text or description, as Maestro
+			// does (core.UiSelectorTextTiers); the textContains forms this
+			// used found "Talk · Open" for "Open" (#188).
+			//
+			// Each query costs a round trip. While polling for an element
+			// that has not appeared yet — the common case — every one of
+			// them missed, repeatedly: measured on a Pixel 4a, 22 of 30 finds
+			// in a single flow were misses burning 2.8s, more than the
+			// successful finds cost.
+			//
+			// The case-insensitive forms (the last tier) find everything the
+			// earlier tiers can, except a value that equals the selector only
+			// literally ("$7.50", whose $ anchors as a regex), which the page
+			// source finds. Probe with those two first and go to the page
+			// source when they find nothing.
+			tiers := core.UiSelectorTextTiers(sel.Text, false)
+			probes := tiers[len(tiers)-1]
+			textHit, textErr := d.client.FindElement("-android uiautomator", `new UiSelector()`+probes[0])
+			descHit, descErr := "", error(nil)
+			if textErr != nil || textHit == "" {
+				descHit, descErr = d.client.FindElement("-android uiautomator", `new UiSelector()`+probes[1])
+			}
+			if (textErr != nil || textHit == "") && (descErr != nil || descHit == "") {
+				// Nothing on screen matches by text or description.
+				return d.findElementByPageSource(sel)
+			}
 
-			if looksLikeRegex(sel.Text) {
-				// Use textMatches for regex patterns
-				uiSelector := fmt.Sprintf(`new UiSelector().textMatches("%s")`, escaped)
-				if elemID, err := d.client.FindElement("-android uiautomator", uiSelector); err == nil && elemID != "" {
-					return d.getElementInfo(elemID)
-				}
-				// Try descriptionMatches
-				uiSelector = fmt.Sprintf(`new UiSelector().descriptionMatches("%s")`, escaped)
-				if elemID, err := d.client.FindElement("-android uiautomator", uiSelector); err == nil && elemID != "" {
-					return d.getElementInfo(elemID)
-				}
-			} else {
-				// Six strategies used to run in order, and every one of them
-				// cost a round trip. While polling for an element that has not
-				// appeared yet — the common case — all six missed, repeatedly:
-				// measured on a Pixel 4a, 22 of 30 finds in a single flow were
-				// misses burning 2.8s, more than the successful finds cost.
-				//
-				// The case-insensitive regex forms are supersets of the exact
-				// and contains forms (verified on device), so if both of them
-				// miss, none of the other four can hit. Probe with those two
-				// first and give up immediately when they find nothing.
-				ciPattern := fmt.Sprintf(`(?is).*\Q%s\E.*`, escaped)
-				textProbe := fmt.Sprintf(`new UiSelector().textMatches("%s")`, ciPattern)
-				descProbe := fmt.Sprintf(`new UiSelector().descriptionMatches("%s")`, ciPattern)
-
-				textHit, textErr := d.client.FindElement("-android uiautomator", textProbe)
-				descHit, descErr := "", error(nil)
-				if textErr != nil || textHit == "" {
-					descHit, descErr = d.client.FindElement("-android uiautomator", descProbe)
-				}
-				if (textErr != nil || textHit == "") && (descErr != nil || descHit == "") {
-					// Nothing on screen matches by text or description.
-					return d.findElementByPageSource(sel)
-				}
-
-				// Something matches. Now prefer the most specific form, since
-				// several elements can qualify and exact should win over
-				// substring, and text over description.
-				for _, uiSelector := range []string{
-					fmt.Sprintf(`new UiSelector().text("%s")`, escaped),
-					fmt.Sprintf(`new UiSelector().textContains("%s")`, escaped),
-					fmt.Sprintf(`new UiSelector().description("%s")`, escaped),
-					fmt.Sprintf(`new UiSelector().descriptionContains("%s")`, escaped),
-				} {
-					if elemID, err := d.client.FindElement("-android uiautomator", uiSelector); err == nil && elemID != "" {
+			// Something matches. Now prefer the most specific form, since
+			// several elements can qualify: equal to the selector, then
+			// matching it in its own case (#151), text before description.
+			for _, tier := range tiers[:len(tiers)-1] {
+				for _, body := range tier {
+					if elemID, err := d.client.FindElement("-android uiautomator", `new UiSelector()`+body); err == nil && elemID != "" {
 						return d.getElementInfo(elemID)
 					}
 				}
+			}
 
-				// Only the case-insensitive form matched — use the probe's hit
-				// rather than paying for the same lookup again.
-				if textHit != "" {
-					return d.getElementInfo(textHit)
-				}
-				if descHit != "" {
-					return d.getElementInfo(descHit)
-				}
+			// Only the case-insensitive form matched — use the probe's hit
+			// rather than paying for the same lookup again.
+			if textHit != "" {
+				return d.getElementInfo(textHit)
+			}
+			if descHit != "" {
+				return d.getElementInfo(descHit)
 			}
 		}
 	}
@@ -645,45 +632,34 @@ func (d *Driver) findElementForTap(sel flow.Selector, timeout time.Duration) (*c
 }
 
 // findElementForTapDirect finds element for tap, trying clickable first then fallback to page source.
+//
+// Every query matches the whole text or description, as Maestro does
+// (core.UiSelectorTextTiers): equal to the selector, then as a regex in its
+// own case, then ignoring case. The textContains passes used here tapped a
+// clickable "Talk · Open" row for `tapOn: Open` (#188).
 func (d *Driver) findElementForTapDirect(sel flow.Selector) (*core.ElementInfo, error) {
-	escaped := escapeUIAutomatorString(sel.Text)
-	ciPattern := fmt.Sprintf(`(?is).*\Q%s\E.*`, escaped)
-
-	// Step 1: Try clickable elements first — case-sensitive, then case-insensitive fallback
-	uiSelector := fmt.Sprintf(`new UiSelector().textContains("%s").clickable(true)`, escaped)
-	if elemID, err := d.client.FindElement("-android uiautomator", uiSelector); err == nil && elemID != "" {
-		return d.getElementInfo(elemID)
-	}
-	uiSelector = fmt.Sprintf(`new UiSelector().descriptionContains("%s").clickable(true)`, escaped)
-	if elemID, err := d.client.FindElement("-android uiautomator", uiSelector); err == nil && elemID != "" {
-		return d.getElementInfo(elemID)
-	}
-	// Case-insensitive clickable fallback
-	uiSelector = fmt.Sprintf(`new UiSelector().textMatches("%s").clickable(true)`, ciPattern)
-	if elemID, err := d.client.FindElement("-android uiautomator", uiSelector); err == nil && elemID != "" {
-		return d.getElementInfo(elemID)
-	}
-	uiSelector = fmt.Sprintf(`new UiSelector().descriptionMatches("%s").clickable(true)`, ciPattern)
-	if elemID, err := d.client.FindElement("-android uiautomator", uiSelector); err == nil && elemID != "" {
-		return d.getElementInfo(elemID)
+	tiers := core.UiSelectorTextTiers(sel.Text, false)
+	if len(tiers) == 0 {
+		return d.findElementByPageSource(sel)
 	}
 
-	// Step 2: Check if text exists at all (without clickable filter)
-	uiSelector = fmt.Sprintf(`new UiSelector().textContains("%s")`, escaped)
-	_, textExistsErr := d.client.FindElement("-android uiautomator", uiSelector)
+	// Step 1: Try clickable elements first, most specific tier first.
+	for _, tier := range tiers {
+		for _, body := range tier {
+			if elemID, err := d.client.FindElement("-android uiautomator", `new UiSelector()`+body+`.clickable(true)`); err == nil && elemID != "" {
+				return d.getElementInfo(elemID)
+			}
+		}
+	}
 
-	if textExistsErr != nil {
-		uiSelector = fmt.Sprintf(`new UiSelector().descriptionContains("%s")`, escaped)
-		_, textExistsErr = d.client.FindElement("-android uiautomator", uiSelector)
-	}
-	if textExistsErr != nil {
-		// Case-insensitive fallback
-		uiSelector = fmt.Sprintf(`new UiSelector().textMatches("%s")`, ciPattern)
-		_, textExistsErr = d.client.FindElement("-android uiautomator", uiSelector)
-	}
-	if textExistsErr != nil {
-		uiSelector = fmt.Sprintf(`new UiSelector().descriptionMatches("%s")`, ciPattern)
-		_, textExistsErr = d.client.FindElement("-android uiautomator", uiSelector)
+	// Step 2: Check if the text exists at all (without clickable filter). The
+	// last tier, ignoring case, finds everything the others can.
+	var textExistsErr error = fmt.Errorf("element with text '%s' not found", sel.Text)
+	for _, body := range tiers[len(tiers)-1] {
+		if _, err := d.client.FindElement("-android uiautomator", `new UiSelector()`+body); err == nil {
+			textExistsErr = nil
+			break
+		}
 	}
 
 	if textExistsErr != nil {

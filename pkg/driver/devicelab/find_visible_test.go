@@ -52,7 +52,9 @@ func TestChecksBySnapshot(t *testing.T) {
 	}
 }
 
-// An anchored id matches an id with a package prefix, as in Maestro.
+// An anchored id matches an id with a package prefix, as in Maestro. The
+// anchors are dropped from the device query, where they add nothing to a
+// whole match (the query used to be a separate unanchored tier).
 func TestAnchoredID(t *testing.T) {
 	if !matchesID(`^auth\.login$`, "com.app:id/auth.login") {
 		t.Error("page source: anchored id should match after the prefix")
@@ -62,11 +64,8 @@ func TestAnchoredID(t *testing.T) {
 		t.Fatal(err)
 	}
 	last := strategies[len(strategies)-1].Value
-	if want := `new UiSelector().resourceIdMatches("(?i)(?:.*/)?(?:auth\.login)")`; last != want {
+	if want := `new UiSelector().resourceIdMatches("(?ims)(?:.*/)?(?:auth\.login)")`; last != want {
 		t.Errorf("last strategy = %s, want %s", last, want)
-	}
-	if core, ok := unanchored(`price\$`); ok || core != `price\$` {
-		t.Errorf("escaped $ is not an anchor: %q %v", core, ok)
 	}
 }
 
@@ -82,7 +81,7 @@ func TestIDIgnoresCase(t *testing.T) {
 	}
 	found := false
 	for _, s := range strategies {
-		if strings.Contains(s.Value, `resourceIdMatches("(?i).*(?:Flatlist).*")`) {
+		if strings.Contains(s.Value, `resourceIdMatches("(?ims)(?:.*/)?(?:Flatlist)")`) {
 			found = true
 		}
 	}

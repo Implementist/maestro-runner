@@ -465,35 +465,21 @@ func (d *Driver) findElementForTapWithContext(ctx context.Context, sel flow.Sele
 }
 
 // buildClickableOnlyStrategies builds UiAutomator strategies that only match clickable elements.
+//
+// Every query matches the whole text or description, as Maestro does
+// (core.UiSelectorTextTiers): the value equal to the selector first, then the
+// selector as a regex in its own case (#151), then ignoring case. The
+// textContains / descriptionContains passes this used for plain text tapped a
+// clickable "Talk · Open" row for `tapOn: Open` (#188); a partial match is
+// written `.*Open.*`.
 func buildClickableOnlyStrategies(sel flow.Selector) ([]LocatorStrategy, error) {
 	var strategies []LocatorStrategy
-	stateFilters := buildStateFilters(sel)
-
-	if sel.Text != "" {
-		if looksLikeRegex(sel.Text) {
-			// Case as written first, then ignoring case, as Maestro matches
-			// (IGNORE_CASE): the ignore-case pass finds "Let's get started!"
-			// for `(let's get started!|...)`, and the first pass still prefers
-			// "SIGN OUT" over "Sign out" for `^SIGN OUT$` (#151).
-			for _, pattern := range []string{"(?s)" + escapeUIAutomatorString(sel.Text), "(?is)" + escapeUIAutomatorString(sel.Text)} {
-				strategies = append(strategies, LocatorStrategy{
-					Strategy: uiautomator2.StrategyUIAutomator,
-					Value:    `new UiSelector().textMatches("` + pattern + `").clickable(true)` + stateFilters,
-				})
-				strategies = append(strategies, LocatorStrategy{
-					Strategy: uiautomator2.StrategyUIAutomator,
-					Value:    `new UiSelector().descriptionMatches("` + pattern + `").clickable(true)` + stateFilters,
-				})
-			}
-		} else {
-			escaped := escapeUIAutomatorString(sel.Text)
+	filters := ".clickable(true)" + buildStateFilters(sel)
+	for _, tier := range core.UiSelectorTextTiers(sel.Text, false) {
+		for _, body := range tier {
 			strategies = append(strategies, LocatorStrategy{
 				Strategy: uiautomator2.StrategyUIAutomator,
-				Value:    `new UiSelector().textContains("` + escaped + `").clickable(true)` + stateFilters,
-			})
-			strategies = append(strategies, LocatorStrategy{
-				Strategy: uiautomator2.StrategyUIAutomator,
-				Value:    `new UiSelector().descriptionContains("` + escaped + `").clickable(true)` + stateFilters,
+				Value:    `new UiSelector()` + body + filters,
 			})
 		}
 	}
@@ -1191,48 +1177,23 @@ func buildSelectorsWithOptions(sel flow.Selector, timeoutMs int, preferClickable
 		}
 	}
 
-	// Exact id first, substring second. The substring fallback is kept for
-	// users relying on it, and fires only after every exact-match strategy:
-	// UiAutomator's `resourceIdMatches(".*X.*")` triggers internal scrolling
-	// and could return an unrelated element it happened to land on.
-	var idTiers [][]string
-	if sel.ID != "" {
-		escaped := escapeUIAutomatorString(sel.ID)
-		idTiers = [][]string{
-			{`.resourceId("` + escaped + `")`},
-			// Grouped, so an id written as a regex alternation
-			// ("omnibarTextInput|inputField") keeps both alternatives inside
-			// the wildcards. Ungrouped, `|` split the whole pattern into
-			// ".*omnibarTextInput" or "inputField.*", and neither matched a
-			// full resource id like "com.app:id/inputField".
-			{`.resourceIdMatches("(?i).*(?:` + escaped + `).*")`},
-		}
-	}
+	// Exact id first, then Maestro's whole match (ignoring case, with or
+	// without the package prefix), which fires only after the exact query:
+	// a resourceIdMatches that finds nothing rendered triggers UiAutomator's
+	// internal scrolling and could return an unrelated element it happened to
+	// land on. The match used to be `.*X.*`, so `id: login` found
+	// "login_button" (#188).
+	idTiers := core.UiSelectorIDTiers(sel.ID)
 
-	// Text: regex patterns go through textMatches, literals through
-	// textContains with a case-insensitive fallback — Android dialog buttons
-	// display "CANCEL" while the hierarchy says "Cancel".
-	var textTiers [][]string
-	if sel.Text != "" {
-		if looksLikeRegex(sel.Text) {
-			// Case as written first, then ignoring case, as Maestro matches
-			// (IGNORE_CASE): the ignore-case pass finds "Let's get started!"
-			// for `(let's get started!|...)`, and the first pass still prefers
-			// "SIGN OUT" over "Sign out" for `^SIGN OUT$` (#151).
-			pattern := escapeUIAutomatorString(sel.Text)
-			textTiers = [][]string{
-				{`.textMatches("(?s)` + pattern + `")`, `.descriptionMatches("(?s)` + pattern + `")`},
-				{`.textMatches("(?is)` + pattern + `")`, `.descriptionMatches("(?is)` + pattern + `")`},
-			}
-		} else {
-			escaped := escapeUIAutomatorString(sel.Text)
-			ciPattern := `(?is).*\Q` + escaped + `\E.*`
-			textTiers = [][]string{
-				{`.textContains("` + escaped + `")`, `.descriptionContains("` + escaped + `")`},
-				{`.textMatches("` + ciPattern + `")`, `.descriptionMatches("` + ciPattern + `")`},
-			}
-		}
-	}
+	// Text: every query matches the whole text or description, as Maestro
+	// does — equal to the selector first, then as a regex in its own case,
+	// then ignoring case (core.UiSelectorTextTiers). The ignore-case pass finds
+	// "CANCEL" on a dialog button whose hierarchy says "Cancel" and "Let's get
+	// started!" for `(let's get started!|...)`; the own-case pass still
+	// prefers "SIGN OUT" over "Sign out" for `^SIGN OUT$` (#151). The
+	// textContains passes plain text used to get matched "Talk · Open" for
+	// "Open" (#188).
+	textTiers := core.UiSelectorTextTiers(sel.Text, false)
 
 	switch {
 	case len(idTiers) > 0 && len(textTiers) > 0:
