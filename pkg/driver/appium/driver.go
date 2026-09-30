@@ -559,6 +559,9 @@ func (d *Driver) findElementByPageSource(sel flow.Selector) (*core.ElementInfo, 
 
 	// Prioritize clickable, then select by index or deepest
 	candidates = SortClickableFirst(candidates)
+	if core.IndexOutOfRange(len(candidates), sel.Index) {
+		return nil, fmt.Errorf("no element at index %s: %d match(es)", sel.Index, len(candidates))
+	}
 	selected := SelectByIndex(candidates, sel.Index)
 
 	// If element isn't clickable, try to find a clickable parent
@@ -910,6 +913,9 @@ func (d *Driver) findElementRelativeWithElements(sel flow.Selector, allElements 
 		// (first) element to match Maestro's .firstOrNull() behavior.
 		selected = candidates[0]
 	} else {
+		if core.IndexOutOfRange(len(candidates), sel.Index) {
+			return nil, fmt.Errorf("no element at index %s: %d match(es)", sel.Index, len(candidates))
+		}
 		selected = SelectByIndex(candidates, sel.Index)
 	}
 

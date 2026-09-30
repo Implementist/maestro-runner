@@ -154,10 +154,10 @@ func TestScrollTargetInHonoursIndex(t *testing.T) {
 	if got == nil || got.Rect.Y != 200 {
 		t.Errorf("index 1 picked %+v, want the second item", got)
 	}
-	// Past the matches, the index falls back to the first match, as it does
-	// for findElement (selectByIndex).
-	if got := d.scrollTargetIn(nodes, flow.Selector{Text: "item", Index: "5"}, 0); got == nil || got.Rect.Y != 100 {
-		t.Errorf("index past the matches picked %+v, want the first item", got)
+	// Past the matches, the index names no element (#188); it used to fall
+	// back to the first match.
+	if got := d.scrollTargetIn(nodes, flow.Selector{Text: "item", Index: "5"}, 0); got != nil {
+		t.Errorf("index past the matches picked %+v, want none", got)
 	}
 	offscreen := []SnapshotNode{{Type: "Cell", Label: "item", Rect: SnapshotRect{X: 0, Y: 2000, Width: 100, Height: 40}}}
 	if d.scrollTargetIn(offscreen, flow.Selector{Text: "item", Index: "0"}, 0) != nil {

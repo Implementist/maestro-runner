@@ -1642,6 +1642,9 @@ func (d *Driver) resolveRelativeSelector(sel flow.Selector) (*core.ElementInfo, 
 
 	candidates = SortClickableFirst(candidates)
 
+	if core.IndexOutOfRange(len(candidates), sel.Index) {
+		return nil, fmt.Errorf("no element at index %s: %d match(es)", sel.Index, len(candidates))
+	}
 	selected := selectRelativeCandidate(candidates, sel.Index, filterType)
 
 	clickableElem := GetClickableElement(selected)
@@ -1719,6 +1722,9 @@ func (d *Driver) findElementRelativeWithElements(sel flow.Selector, allElements 
 
 	candidates = SortClickableFirst(candidates)
 
+	if core.IndexOutOfRange(len(candidates), sel.Index) {
+		return nil, nil, fmt.Errorf("no element at index %s: %d match(es)", sel.Index, len(candidates))
+	}
 	selected := selectRelativeCandidate(candidates, sel.Index, filterType)
 
 	clickableElem := GetClickableElement(selected)
@@ -1756,6 +1762,9 @@ func (d *Driver) findElementByPageSourceOnce(sel flow.Selector) (*uiautomator2.E
 		return nil, nil, fmt.Errorf("no elements match selector")
 	}
 
+	if core.IndexOutOfRange(len(candidates), sel.Index) {
+		return nil, nil, fmt.Errorf("no element at index %s: %d match(es)", sel.Index, len(candidates))
+	}
 	selected := SelectByIndex(candidates, sel.Index)
 
 	clickableElem := GetClickableElement(selected)
@@ -1814,6 +1823,9 @@ func (d *Driver) findElementByPageSourceOnceInternal(sel flow.Selector) (*core.E
 		return nil, fmt.Errorf("no elements match selector")
 	}
 
+	if core.IndexOutOfRange(len(candidates), sel.Index) {
+		return nil, fmt.Errorf("no element at index %s: %d match(es)", sel.Index, len(candidates))
+	}
 	selected := SelectByIndex(candidates, sel.Index)
 
 	clickableElem := GetClickableElement(selected)

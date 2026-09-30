@@ -1345,7 +1345,8 @@ func (d *Driver) findElement(sel flow.Selector, optional bool, stepTimeoutMs int
 		if err != nil && !isSnapshotFailure(err) {
 			return nil, err
 		}
-		if len(nodes) > 0 {
+		// An index past the matches is a miss, not the first match (#188).
+		if len(nodes) > 0 && !core.IndexOutOfRange(len(nodes), sel.Index) {
 			return selectByIndex(nodesToPtrs(nodes), sel.Index), nil
 		}
 

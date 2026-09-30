@@ -3298,7 +3298,7 @@ func TestSimpleSelectorWithIndex(t *testing.T) {
 		{"index 2 returns third", "2", 400},
 		{"index -1 returns last", "-1", 400},
 		{"index -2 returns second to last", "-2", 250},
-		{"index out of range defaults to first", "99", 100},
+		{"index out of range names no element (#188)", "99", -1},
 	}
 
 	for _, tt := range tests {
@@ -3318,6 +3318,12 @@ func TestSimpleSelectorWithIndex(t *testing.T) {
 				Index: tt.index,
 			}
 			_, info, err := driver.findElementByPageSourceOnce(sel)
+			if tt.expectedY < 0 {
+				if err == nil {
+					t.Errorf("index %s past the matches found an element at Y=%d, want none", tt.index, info.Bounds.Y)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("expected success, got error: %v", err)
 			}

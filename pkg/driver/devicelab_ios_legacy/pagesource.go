@@ -254,8 +254,13 @@ func selectByIndex(candidates []*SnapshotNode, index string) *SnapshotNode {
 		return candidates[0]
 	}
 	i, err := strconv.Atoi(index)
-	if err != nil || i < 0 || i >= len(candidates) {
+	if err != nil {
 		return candidates[0]
+	}
+	// An index past the matches names no element; it used to fall back to
+	// the first match (#188).
+	if i < 0 || i >= len(candidates) {
+		return nil
 	}
 	return candidates[i]
 }
