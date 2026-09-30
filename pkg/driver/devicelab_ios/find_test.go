@@ -3,6 +3,7 @@ package devicelab_ios
 import (
 	"testing"
 
+	"github.com/devicelab-dev/maestro-runner/pkg/core"
 	"github.com/devicelab-dev/maestro-runner/pkg/flow"
 )
 
@@ -248,6 +249,24 @@ func TestMayContain(t *testing.T) {
 	} {
 		if got := mayContain(c.outer, c.inner); got != c.want {
 			t.Errorf("%s: mayContain = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// Bounds come from truncated edges, as in Maestro, so a crop matches the size
+// of a baseline Maestro took: y=100.33 + h=168.67 is 169 points tall, not 168.
+func TestBoundsMatchMaestroEdges(t *testing.T) {
+	for _, tc := range []struct {
+		n    Node
+		want core.Bounds
+	}{
+		{Node{X: 16, Y: 100.33, W: 370, H: 168.67}, core.Bounds{X: 16, Y: 100, Width: 370, Height: 169}},
+		{Node{X: 16.5, Y: 200, W: 369.8, H: 40}, core.Bounds{X: 16, Y: 200, Width: 370, Height: 40}},
+		{Node{X: 0, Y: 0, W: 402, H: 874}, core.Bounds{X: 0, Y: 0, Width: 402, Height: 874}},
+		{Node{X: 10.9, Y: 10.9, W: 0.05, H: 0.05}, core.Bounds{X: 10, Y: 10, Width: 0, Height: 0}},
+	} {
+		if got := bounds(tc.n); got != tc.want {
+			t.Errorf("bounds(%+v) = %+v, want %+v", tc.n, got, tc.want)
 		}
 	}
 }

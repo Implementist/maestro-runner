@@ -371,8 +371,16 @@ func elementText(n Node) string {
 	return firstNonEmpty(n.Title, n.Value, n.Placeholder, n.Label)
 }
 
+// bounds converts the agent's point rect to whole points the way Maestro does
+// (AXElement.boundsString): each edge is truncated and the size is the
+// difference of the edges. Truncating the size itself lost a point whenever
+// the element started on a fraction: y=100.33 with height 168.67 became 168
+// here and 169 in Maestro, so every cropOn screenshot came out 3px (one point
+// at 3x) shorter than a baseline Maestro took, and assertScreenshot failed on
+// size alone.
 func bounds(n Node) core.Bounds {
-	return core.Bounds{X: int(n.X), Y: int(n.Y), Width: int(n.W), Height: int(n.H)}
+	x, y := int(n.X), int(n.Y)
+	return core.Bounds{X: x, Y: y, Width: int(n.X+n.W) - x, Height: int(n.Y+n.H) - y}
 }
 
 func describe(sel flow.Selector) string {
