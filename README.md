@@ -43,7 +43,7 @@
 curl -fsSL https://open.devicelab.dev/install/maestro-runner | bash
 
 # A specific version
-curl -fsSL https://open.devicelab.dev/install/maestro-runner | bash -s -- --version 1.1.27
+curl -fsSL https://open.devicelab.dev/install/maestro-runner | bash -s -- --version 1.1.28
 ```
 
 **npm** — for React Native, Expo, or any project that already has a `package.json`:
@@ -82,7 +82,7 @@ maestro-runner test --parallel 3 flows/                                 # Parall
 - **Cloud testing** — BrowserStack, Sauce Labs, LambdaTest, TestingBot via Appium driver [Guide →](https://devicelab.dev/blog/run-maestro-flows-any-cloud)
 - **Desktop browser testing** — Run Maestro flows on Chrome/Chromium via CDP. Supports `css`, `xpath`, `id`, and `text` selectors with `--platform web` [Guide →](https://devicelab.dev/open-source/maestro-runner/docs/web-testing)
 - **React Native & Flutter** — Smart element finding for RN testIDs and Flutter semantics [Guide →](https://devicelab.dev/blog/flutter-testing-maestro-patrol-appium)
-- **DeviceLab driver** — Optional on-device Android driver via WebSocket, ~2x faster than UIAutomator2 and ~5x faster than Maestro CLI. Just add `--driver devicelab`
+- **DeviceLab driver** — The default Android driver: an on-device agent over WebSocket, ~2x faster than UIAutomator2 and ~5x faster than Maestro CLI. On iOS, `--driver devicelab` runs the DeviceLab iOS agent on simulators and real iPhones
 - **Parallel execution** — Dynamic work distribution across devices, not static sharding. Faster devices pick up more tests automatically, so no device sits idle
 - **App install built-in** — `--app-file app.apk` installs the app before testing, so you always test the right build
 - **Wide OS compatibility** — Android 5.0+ (API 21+) and iOS 15.0+, no version restrictions
@@ -101,15 +101,16 @@ maestro-runner test --parallel 3 flows/                                 # Parall
 
 | Driver | Platform | Description |
 |--------|----------|-------------|
-| **UIAutomator2** | Android | Direct connection to device. Default driver, no external server needed. |
-| **DeviceLab** | Android | `--driver devicelab`. On-device WebSocket driver, ~2x faster than UIAutomator2. |
-| **WDA (WebDriverAgent)** | iOS | Auto-selected with `--platform ios`. Supports simulators and physical devices. |
+| **DeviceLab** | Android | Default since v1.1.28. On-device WebSocket driver, ~2x faster than UIAutomator2. |
+| **UIAutomator2** | Android | `--driver uiautomator2`. Direct connection to the device, no external server needed. |
+| **WDA (WebDriverAgent)** | iOS | Default with `--platform ios`. Supports simulators and physical devices. |
+| **DeviceLab** | iOS | `--driver devicelab`. The DeviceLab iOS agent, on simulators and real iPhones (real iPhones need `--team-id`). `--driver devicelab-legacy` keeps the previous runner. |
 | **Browser (CDP)** | Web | `--platform web`. Chrome/Chromium automation via Chrome DevTools Protocol. |
 | **Appium** | Android & iOS | `--driver appium`. For cloud testing providers and existing Appium infrastructure. |
 
 ### DeviceLab Driver (Android)
 
-The DeviceLab driver is an alternative Android driver that runs automation directly on the device via WebSocket. It skips the UIAutomator2 HTTP layer, resulting in ~2x faster test execution compared to the default driver — and ~5x faster than Maestro CLI.
+The DeviceLab driver is the default Android driver (since v1.1.28). It runs automation directly on the device via WebSocket, skipping the UIAutomator2 HTTP layer, for ~2x faster test execution than UIAutomator2 — and ~5x faster than Maestro CLI. `--driver uiautomator2` selects the previous default.
 
 ```
 Benchmark: 9 flows, 163 steps on Pixel 4a (Android 13)
@@ -120,7 +121,8 @@ Benchmark: 9 flows, 163 steps on Pixel 4a (Android 13)
 ```
 
 ```bash
-maestro-runner --driver devicelab --platform android test flows/
+maestro-runner --platform android test flows/          # DeviceLab
+maestro-runner --driver uiautomator2 test flows/        # UIAutomator2
 ```
 
 All existing Maestro YAML flows work as-is — no changes needed. The driver also includes bounds stabilization for animated elements and improved special character handling in text selectors.
