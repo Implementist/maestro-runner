@@ -1752,26 +1752,43 @@ func (d *Driver) waitForTreeChange(before uint64, wait time.Duration) bool {
 }
 
 // Settle limits. The agent reads the tree back to back and calls it settled
-// once it has stayed the same for settleQuietMs. waitForIdleTimeout: 0 skips
-// settling; its value does not cap it (the default is 200ms, far below what a
-// screen change takes). The window was 500ms because a 200ms one pressed Back
-// before duckduckgo's "Close Autofill Dialog" (shown a moment after "Save
-// Password") appeared, the way Maestro fails that flow; 200ms is back while
-// the full suites measure what the shorter window costs and gains.
+// once it has stayed the same for the quiet window. waitForIdleTimeout: 0
+// skips settling; its value does not cap it (the default is 200ms, far below
+// what a screen change takes).
+//
+// After a tap the window is 200ms: taps start animations, which change the
+// screen continuously, and the shorter window made the tap-heavy suites
+// 8-12% faster (RNTester, React Navigation). After openLink and Enter it is
+// 500ms: those start page loads, and a blank page stays still while it
+// downloads. With 200ms there, duckduckgo's deeplink flow read the address
+// bar ("duckduckgo.com") before the results page replaced it with the
+// query, and a 200ms window once pressed Back before duckduckgo's delayed
+// "Close Autofill Dialog" (after Enter) appeared.
 const (
 	openLinkChangeWait      = 3 * time.Second
 	openLinkSettleTimeoutMs = 5000
 	settleAfterTapTimeoutMs = 2000
 	settleQuietMs           = 200
+	pageSettleQuietMs       = 500
 )
 
-// settle waits for the screen to stop changing, for at most maxMs; it is
-// off when waitForIdleTimeout is 0.
+// settle waits for the screen to stop changing after a tap, for at most
+// maxMs; it is off when waitForIdleTimeout is 0.
 func (d *Driver) settle(maxMs int, what string) {
+	d.settleFor(maxMs, settleQuietMs, what)
+}
+
+// settlePage is settle for a page load (openLink, Enter): the screen must
+// stay still for the longer pageSettleQuietMs.
+func (d *Driver) settlePage(maxMs int, what string) {
+	d.settleFor(maxMs, pageSettleQuietMs, what)
+}
+
+func (d *Driver) settleFor(maxMs, quietMs int, what string) {
 	if d.idleTimeoutSet && d.idleTimeoutMs == 0 {
 		return
 	}
-	if settled, err := d.client.WaitForSettle(maxMs, settleQuietMs); err != nil {
+	if settled, err := d.client.WaitForSettle(maxMs, quietMs); err != nil {
 		logger.Debug("[devicelab] settle after %s: %v", what, err)
 	} else if !settled {
 		logger.Debug("[devicelab] settle after %s: still changing after %dms", what, maxMs)
@@ -1803,7 +1820,7 @@ func (d *Driver) pressKey(step *flow.PressKeyStep) *core.CommandResult {
 	// duckduckgo's native input widget, and the tap it guarded then found
 	// nothing once the page had loaded.
 	if keyCode == uiautomator2.KeyCodeEnter && !d.isBrowserMode() {
-		d.settle(openLinkSettleTimeoutMs, "enter")
+		d.settlePage(openLinkSettleTimeoutMs, "enter")
 	}
 
 	return successResult(fmt.Sprintf("Pressed key: %s", key), nil)
@@ -2549,7 +2566,7 @@ func (d *Driver) openLink(step *flow.OpenLinkStep) *core.CommandResult {
 		if beforeErr == nil {
 			d.waitForTreeChange(beforeHash, openLinkChangeWait)
 		}
-		d.settle(openLinkSettleTimeoutMs, "openLink")
+		d.settlePage(openLinkSettleTimeoutMs, "openLink")
 	}
 
 	return successResult(fmt.Sprintf("Opened link: %s", link), nil)

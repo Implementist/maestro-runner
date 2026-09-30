@@ -139,3 +139,40 @@ func TestRemainingTimeoutMs(t *testing.T) {
 		t.Errorf("default optional timeout 2s in: %dms left", got)
 	}
 }
+
+// The wait after a tap uses the short 200ms quiet window; the wait after a
+// page load (Enter, openLink) uses 500ms, since a blank page stays still
+// while it downloads: with 200ms duckduckgo's deeplink flow read the address
+// bar before the results page replaced it.
+func TestSettleWindowsForTapsAndPageLoads(t *testing.T) {
+	client := &richClient{trackingClient: newTrackingClient(), settleQuiet: true}
+	d := New(client, &core.PlatformInfo{}, &mockShell{})
+
+	d.lastStepWasTap = true
+	d.Execute(&flow.PressKeyStep{BaseStep: flow.BaseStep{StepType: flow.StepPressKey}, Key: "back"})
+	if len(client.settleCalls) != 1 || client.settleCalls[0] != [2]int{settleAfterTapTimeoutMs, 200} {
+		t.Fatalf("after a tap: settle calls %v, want [[%d 200]]", client.settleCalls, settleAfterTapTimeoutMs)
+	}
+
+	client.settleCalls = nil
+	d.lastStepWasTap = false
+	d.Execute(&flow.PressKeyStep{BaseStep: flow.BaseStep{StepType: flow.StepPressKey}, Key: "enter"})
+	if len(client.settleCalls) != 1 || client.settleCalls[0] != [2]int{openLinkSettleTimeoutMs, 500} {
+		t.Fatalf("after Enter: settle calls %v, want [[%d 500]]", client.settleCalls, openLinkSettleTimeoutMs)
+	}
+
+	client.settleCalls = nil
+	d.settlePage(openLinkSettleTimeoutMs, "openLink")
+	if len(client.settleCalls) != 1 || client.settleCalls[0][1] != 500 {
+		t.Fatalf("page settle: calls %v, want a 500ms quiet window", client.settleCalls)
+	}
+
+	// waitForIdleTimeout: 0 turns both off.
+	client.settleCalls = nil
+	d.idleTimeoutSet, d.idleTimeoutMs = true, 0
+	d.settle(settleAfterTapTimeoutMs, "tap")
+	d.settlePage(openLinkSettleTimeoutMs, "openLink")
+	if len(client.settleCalls) != 0 {
+		t.Fatalf("waitForIdleTimeout 0: settle calls %v, want none", client.settleCalls)
+	}
+}
