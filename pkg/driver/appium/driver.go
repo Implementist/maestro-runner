@@ -110,6 +110,22 @@ func (d *Driver) RestartSession() error {
 	return nil
 }
 
+// forgetTappedElementUnlessTyping clears the element the last tapOn resolved,
+// for every step that can move focus. inputText on iOS types into that element
+// by id and WDA re-focuses it, so a stale id sent text into a field the flow
+// had already left (or failed once it was gone). Text entry and read-only
+// steps keep it; tapOn sets it again when it resolves a native element.
+func (d *Driver) forgetTappedElementUnlessTyping(step flow.Step) {
+	switch step.(type) {
+	case *flow.InputTextStep, *flow.InputRandomStep, *flow.EraseTextStep, *flow.PasteTextStep,
+		*flow.CopyTextFromStep, *flow.AssertVisibleStep, *flow.AssertNotVisibleStep,
+		*flow.WaitUntilStep, *flow.TakeScreenshotStep, *flow.AssertScreenshotStep,
+		*flow.WaitForAnimationToEndStep, *flow.WaitStep:
+		return
+	}
+	d.lastTappedElementID = ""
+}
+
 // deepCopyCaps returns a deep copy of a capabilities map via JSON round-trip.
 func deepCopyCaps(caps map[string]interface{}) map[string]interface{} {
 	if caps == nil {
@@ -143,6 +159,7 @@ func (d *Driver) Execute(step flow.Step) *core.CommandResult {
 }
 
 func (d *Driver) executeStep(step flow.Step) *core.CommandResult {
+	d.forgetTappedElementUnlessTyping(step)
 	switch s := step.(type) {
 	case *flow.TapOnStep:
 		return d.tapOn(s)
@@ -415,16 +432,16 @@ func (d *Driver) findElementDirect(sel flow.Selector) (*core.ElementInfo, error)
 				// Regex ID: use page source (Appium's UiAutomator calls are slow when element absent)
 				return d.findElementByPageSource(sel)
 			}
-			// Literal ID: use UiAutomator for fast lookup. The whole id, or
-			// the part after the package prefix, ignoring case, as Maestro's
-			// idMatches; it was `.*id.*`, which found "login_button" for
+			// Literal ID: the exact id first; the id strategy prefixes the app
+			// package itself when the id has none. Then the whole id, or the
+			// part after the package prefix, ignoring case, as Maestro's
+			// idMatches; a substring query found "login_button" for
 			// `id: login` (#188).
-			uiSelector := `new UiSelector().resourceIdMatches("` + escapeUIAutomatorString(core.UiAutomatorIDRegex(sel.ID)) + `")`
-			if elemID, err := d.client.FindElement("-android uiautomator", uiSelector); err == nil && elemID != "" {
+			if elemID, err := d.client.FindElement("id", sel.ID); err == nil && elemID != "" {
 				return d.getElementInfo(elemID)
 			}
-			// Fallback to standard id strategy
-			if elemID, err := d.client.FindElement("id", sel.ID); err == nil {
+			uiSelector := `new UiSelector().resourceIdMatches("` + escapeUIAutomatorString(core.UiAutomatorIDRegex(sel.ID)) + `")`
+			if elemID, err := d.client.FindElement("-android uiautomator", uiSelector); err == nil && elemID != "" {
 				return d.getElementInfo(elemID)
 			}
 		}
@@ -546,6 +563,7 @@ func (d *Driver) findElementByPageSource(sel flow.Selector) (*core.ElementInfo, 
 		return nil, err
 	}
 	d.platform = platform
+	elements = d.onScreen(elements)
 
 	// Filter by selector
 	candidates := FilterBySelector(elements, sel, platform)
@@ -618,7 +636,13 @@ func (d *Driver) findElementForTap(sel flow.Selector, timeout time.Duration) (*c
 		var info *core.ElementInfo
 		var err error
 
-		if sel.Text != "" && d.platform == "ios" {
+		if needsFullSelectorMatch(sel) {
+			// The text queries below know only the text, so an id, a state
+			// filter or a size next to it was dropped and the first element
+			// with that text was tapped (the #157 defect, on the tap path).
+			// Page source checks every field together.
+			info, err = d.findElementByPageSource(sel)
+		} else if sel.Text != "" && d.platform == "ios" {
 			// iOS: exact match first, then page source with clickable prioritization
 			info, err = d.findElementForTapIOS(sel)
 		} else if sel.Text != "" && d.platform != "ios" {
@@ -638,6 +662,35 @@ func (d *Driver) findElementForTap(sel flow.Selector, timeout time.Duration) (*c
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+// onScreen drops elements less than 10% inside the viewport. Page source lists
+// the whole accessibility tree, off-screen rows included, so without this a
+// below-the-fold element passed assertVisible and could win an index or a
+// tap. Same rule as Maestro's filterOutOfBounds and the uiautomator2 and WDA
+// drivers. Without a known screen size the list is returned unchanged.
+func (d *Driver) onScreen(elements []*ParsedElement) []*ParsedElement {
+	w, h := d.client.ScreenSize()
+	if w <= 0 || h <= 0 {
+		return elements
+	}
+	out := make([]*ParsedElement, 0, len(elements))
+	for _, e := range elements {
+		if e.Bounds.VisiblePercentage(w, h) >= 0.1 {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// needsFullSelectorMatch reports whether a text selector carries other fields
+// (id, state filters, size) that the text-only native queries cannot express.
+func needsFullSelectorMatch(sel flow.Selector) bool {
+	if sel.Text == "" {
+		return false
+	}
+	return sel.ID != "" || sel.Enabled != nil || sel.Selected != nil || sel.Focused != nil ||
+		sel.Checked != nil || sel.Width > 0 || sel.Height > 0
 }
 
 // findElementForTapDirect finds element for tap, trying clickable first then fallback to page source.
@@ -820,7 +873,7 @@ func (d *Driver) findElementRelativeWithContext(ctx context.Context, sel flow.Se
 			}
 			d.platform = platform
 
-			info, err := d.findElementRelativeWithElements(sel, elements, platform)
+			info, err := d.findElementRelativeWithElements(sel, d.onScreen(elements), platform)
 			if err == nil && info != nil {
 				return info, nil
 			}
@@ -842,7 +895,7 @@ func (d *Driver) findElementRelativeOnce(sel flow.Selector) (*core.ElementInfo, 
 	}
 	d.platform = platform
 
-	return d.findElementRelativeWithElements(sel, elements, platform)
+	return d.findElementRelativeWithElements(sel, d.onScreen(elements), platform)
 }
 
 func (d *Driver) findElementRelativeWithElements(sel flow.Selector, allElements []*ParsedElement, platform string) (*core.ElementInfo, error) {

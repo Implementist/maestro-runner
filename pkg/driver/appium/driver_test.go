@@ -2012,7 +2012,8 @@ func TestOpenLinkError(t *testing.T) {
 func TestPasteTextError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(r.URL.Path, "/appium/device/get_clipboard") {
+		// Both the mobile: command and the legacy route fail.
+		if strings.Contains(r.URL.Path, "/appium/device/get_clipboard") || strings.HasSuffix(r.URL.Path, "/execute/sync") {
 			writeJSON(w, map[string]interface{}{
 				"value": map[string]interface{}{
 					"error":   "clipboard failed",
@@ -2616,7 +2617,12 @@ func TestInputText_AndroidTypesIntoActiveElement(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		path := r.URL.Path
 		switch {
+		// Real servers route only GET /element/active (UiAutomator2 server
+		// AppiumServlet, Appium 3 core); a POST 404s.
 		case strings.HasSuffix(path, "/element/active") && r.Method == "POST":
+			w.WriteHeader(http.StatusNotFound)
+			writeJSON(w, map[string]interface{}{"value": map[string]interface{}{"error": "unknown method", "message": "POST not routed"}})
+		case strings.HasSuffix(path, "/element/active") && r.Method == "GET":
 			writeJSON(w, map[string]interface{}{
 				"value": map[string]interface{}{"element-6066-11e4-a52e-4f735466cecf": "focused-1"},
 			})

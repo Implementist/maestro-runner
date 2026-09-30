@@ -92,7 +92,9 @@ func TestAndroidSelectorsDoNotMatchPartially(t *testing.T) {
 func TestAndroidQueriesMatchWhole(t *testing.T) {
 	d, s := newAndroidQueryDriver(t)
 	_, _ = d.findElementDirect(flow.Selector{ID: "login"})
-	if len(s.queries) == 0 || s.queries[0] != `new UiSelector().resourceIdMatches("(?ims)(?:.*/)?(?:login)")` {
+	// The exact id strategy goes first; the UiAutomator query that follows
+	// must match the whole id.
+	if !containsQuery(s.queries, `new UiSelector().resourceIdMatches("(?ims)(?:.*/)?(?:login)")`) {
 		t.Errorf("id query = %q", s.queries)
 	}
 
@@ -108,4 +110,13 @@ func TestAndroidQueriesMatchWhole(t *testing.T) {
 	if len(s.queries) == 0 || s.queries[0] != `new UiSelector().text("Open").clickable(true)` {
 		t.Errorf("first tap query = %q", s.queries)
 	}
+}
+
+func containsQuery(queries []string, want string) bool {
+	for _, q := range queries {
+		if q == want {
+			return true
+		}
+	}
+	return false
 }
