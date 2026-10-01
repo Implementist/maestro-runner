@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **WDA keeps enough idle connections for its own parallel reads.** The driver reads an element's name, rect, text and displayed at once, and a tap looks an element up four ways at once, but Go's default transport keeps two idle connections per host, so every burst closed two connections and opened two new ones. Through a forwarded port to a physical iPhone, new connections opened together fail with EOF and are sent again, which costs time on every step. The WDA client now keeps up to eight.
+- **`retry` counts retries, not attempts, as Maestro does.** `maxRetries: 1` now runs the commands twice (once, then one retry), an unset `maxRetries` means one retry, and the value is capped at 3. The runner ran exactly `maxRetries` attempts, three when unset and with no cap, so `maxRetries: 1` never retried. A value that is not an integer is logged and read as 1 instead of failing the step.
 
 ## [1.1.28] - 2026-09-30
 
