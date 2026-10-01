@@ -1181,7 +1181,7 @@ func (d *Driver) resolveRelativeSelector(sel flow.Selector, allElements []*Parse
 	if anchorSelector != nil {
 		anchors := FilterBySelector(allElements, *anchorSelector)
 		if len(anchors) == 0 {
-			return nil, fmt.Errorf("anchor element not found")
+			return nil, notFound("anchor element not found")
 		}
 
 		var matchingCandidates []*ParsedElement
@@ -1203,7 +1203,7 @@ func (d *Driver) resolveRelativeSelector(sel flow.Selector, allElements []*Parse
 	// Bounds-based visibility (FilterOutOfBounds already applied above);
 	// XCUITest's `visible="false"` is unreliable on RN testID wrappers.
 	if len(candidates) == 0 {
-		return nil, fmt.Errorf("no elements match selector")
+		return nil, notFound("no elements match selector")
 	}
 
 	// Prioritize clickable/interactive elements
@@ -1262,10 +1262,10 @@ func (d *Driver) findElementByPageSourceOnce(sel flow.Selector) (*core.ElementIn
 	if len(candidates) == 0 {
 		if sel.Text != "" {
 			if closest := ClosestTexts(allElements, sel.Text, 3); len(closest) > 0 {
-				return nil, fmt.Errorf("no elements match selector; closest on-screen texts: %s", strings.Join(closest, ", "))
+				return nil, notFound("no elements match selector; closest on-screen texts: %s", strings.Join(closest, ", "))
 			}
 		}
-		return nil, fmt.Errorf("no elements match selector")
+		return nil, notFound("no elements match selector")
 	}
 
 	// Prioritize clickable/interactive elements

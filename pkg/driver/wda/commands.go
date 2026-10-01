@@ -403,8 +403,10 @@ func (d *Driver) countVisibleMatchesOnce(sel flow.Selector) (int, error) {
 
 func (d *Driver) assertNotVisible(step *flow.AssertNotVisibleStep) *core.CommandResult {
 	// Poll with quick checks, waiting for element to disappear.
-	// Each check is a single lookup (no retries). If element is not found
-	// at any point, we pass immediately. If still visible at timeout, fail.
+	// Each check is a single lookup (no retries). If a lookup reads the
+	// screen and finds no match, we pass immediately. A lookup that could not
+	// read the screen proves nothing, so polling goes on, as it does while the
+	// element is still visible, and the step fails at timeout.
 	timeoutMs := step.TimeoutMs
 	if timeoutMs <= 0 {
 		timeoutMs = 5000
@@ -415,11 +417,14 @@ func (d *Driver) assertNotVisible(step *flow.AssertNotVisibleStep) *core.Command
 
 	for {
 		info, err := d.findElementOnce(step.Selector)
-		if err != nil || info == nil {
+		if isNotFound(err) || (err == nil && info == nil) {
 			return successResult("Element is not visible", nil)
 		}
 
 		if time.Now().After(deadline) {
+			if err != nil {
+				return errorResult(err, fmt.Sprintf("Could not check that %s is not visible: %v", selectorDesc(step.Selector), err))
+			}
 			return errorResult(fmt.Errorf("element is visible"), fmt.Sprintf("Element should not be visible: %s", selectorDesc(step.Selector)))
 		}
 
@@ -1629,6 +1634,10 @@ func (d *Driver) waitUntil(step *flow.WaitUntilStep) *core.CommandResult {
 		selector = step.NotVisible
 	}
 
+	// The last notVisible check that could not read the screen, if the last
+	// check was one.
+	var unreadable error
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -1638,6 +1647,10 @@ func (d *Driver) waitUntil(step *flow.WaitUntilStep) *core.CommandResult {
 					context.DeadlineExceeded,
 					fmt.Sprintf("Element '%s' not visible within %v", selector.Describe(), timeout),
 				)
+			}
+			if unreadable != nil {
+				return errorResult(unreadable,
+					fmt.Sprintf("Could not check that '%s' is not visible within %v: %v", selector.Describe(), timeout, unreadable))
 			}
 			return errorResult(
 				context.DeadlineExceeded,
@@ -1651,10 +1664,17 @@ func (d *Driver) waitUntil(step *flow.WaitUntilStep) *core.CommandResult {
 					return successResult("Element became visible", info)
 				}
 			} else {
-				// Single attempt for not visible check
+				// Single attempt for not visible check. Only a lookup that
+				// read the screen and found no match means the element is
+				// gone; one that could not read it is tried again.
 				info, err := d.findElementOnce(*step.NotVisible)
-				if err != nil || info == nil {
+				if isNotFound(err) || (err == nil && info == nil) {
 					return successResult("Element became not visible", nil)
+				}
+				unreadable = err
+				if unreadable != nil {
+					// A refused connection fails at once; do not spin on it.
+					time.Sleep(50 * time.Millisecond)
 				}
 			}
 			// HTTP round-trip (~100ms) is natural rate limit, no sleep needed
