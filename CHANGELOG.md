@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **WDA keeps enough idle connections for its own parallel reads.** The driver reads an element's name, rect, text and displayed at once, and a tap looks an element up four ways at once, but Go's default transport keeps two idle connections per host, so every burst closed two connections and opened two new ones. Through a forwarded port to a physical iPhone, new connections opened together fail with EOF and are sent again, which costs time on every step. The WDA client now keeps up to eight.
+
 ## [1.1.28] - 2026-09-30
 
 This release is about **running a Maestro suite and getting Maestro's answer**. Most of it came from running real Maestro suites (DuckDuckGo Android and iOS, React Native's RNTester, React Navigation) side by side with Maestro and fixing each place the two disagreed. The largest of those is selector matching: text and id selectors now match the whole value, as Maestro does, which is a behaviour change — see below. DeviceLab becomes the default driver on both platforms: on iOS it runs a new agent, on simulators and on real iPhones. Every flow gets `DEVICE_UDID`, `-e` stops splitting values at commas, and the Appium driver closes a long list of gaps with the native drivers.
