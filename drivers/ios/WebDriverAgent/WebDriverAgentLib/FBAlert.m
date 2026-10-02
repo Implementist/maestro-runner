@@ -166,6 +166,23 @@
   return [resultText componentsJoinedByString:@"\n"];
 }
 
+- (BOOL)hasTextInputField
+{
+  id<FBXCElementSnapshot> alertSnapshot = self.alertSnapshot;
+  if (nil == alertSnapshot) {
+    return NO;
+  }
+
+  __block BOOL hasInput = NO;
+  [alertSnapshot enumerateDescendantsUsingBlock:^(id<FBXCElementSnapshot> descendant) {
+    XCUIElementType elementType = descendant.elementType;
+    if (elementType == XCUIElementTypeTextField || elementType == XCUIElementTypeSecureTextField) {
+      hasInput = YES;
+    }
+  }];
+  return hasInput;
+}
+
 - (void)typeText:(NSString *)text
 {
   XCUIElement *alertElement = self.alertElement;

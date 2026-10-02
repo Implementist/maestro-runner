@@ -12,6 +12,7 @@
 #import <objc/runtime.h>
 
 #import "FBXCAccessibilityElement.h"
+#import "FBAlert.h"
 #import "FBAlertsMonitor.h"
 #import "FBConfiguration.h"
 #import "FBElementCache.h"
@@ -63,6 +64,17 @@ NSString *const FBSessionWasKilledNotification = @"FBSessionWasKilledNotificatio
 
 - (void)didDetectAlert:(FBAlert *)alert
 {
+  // Credential prompts (e.g. the StoreKit "Sign in to Apple Account" password
+  // sheet) are presented as alerts that contain a text input field. Auto
+  // accept/dismiss submits them empty and immediately raises a validation
+  // alert, and it races any flow that needs to type the credentials. Leave
+  // them for the flow: permission dialogs have no text fields and keep being
+  // auto-handled below.
+  if ([alert hasTextInputField]) {
+    [FBLogger log:@"Detected a system alert with a text input field; skipping the default alert action and leaving it for the flow to handle."];
+    return;
+  }
+
   NSString *autoClickAlertSelector = FBConfiguration.sharedInstance.autoClickAlertSelector;
   if ([autoClickAlertSelector length] > 0) {
     @try {

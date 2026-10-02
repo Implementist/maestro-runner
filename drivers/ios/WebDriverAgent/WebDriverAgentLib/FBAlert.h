@@ -39,6 +39,19 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)isPresent;
 
 /**
+ Determines whether the alert contains an editable text input (a text field
+ or a secure text field).
+
+ Credential prompts such as the system "Sign in to Apple Account" sheet are
+ presented as alerts with one input field. Callers that only auto-handle
+ permission dialogs should leave such alerts alone: accepting them submits
+ the form empty and immediately raises a validation alert, and it also races
+ whatever flow needs to type the credentials.
+ See isPresent for how presence is resolved.
+ */
+- (BOOL)hasTextInputField;
+
+/**
  Gets the labels of the buttons visible in the alert.
  See isPresent for how presence is resolved.
  */
