@@ -1196,7 +1196,13 @@ func (d *Driver) launchApp(step *flow.LaunchAppStep) *core.CommandResult {
 		"defaultAlertAction":      d.alertAction,
 	}
 	if d.alertAction == "accept" {
-		sessionSettings["acceptAlertButtonSelector"] = "**/XCUIElementTypeButton[`label BEGINSWITH[c] 'Allow' OR label ==[c] 'OK'`]"
+		// 国行真机新装 App 会弹出 3 键「允许无线数据」系统弹窗
+		// (WLAN & Cellular / WLAN Only / Don't Allow)。原 selector 只匹配
+		// Allow/OK，匹配失败后 WDA fallback 按 alert 类型取 lastObject，
+		// 恰好点到 Don't Allow，导致网络被封。追加 WLAN/蜂窝 匹配后，
+		// 该弹窗会命中首匹配 "WLAN & Cellular"（放行）；对 2 键权限弹窗
+		// （相机/麦克风等）selector 不匹配，行为不变（fallback lastObject=Allow）。
+		sessionSettings["acceptAlertButtonSelector"] = "**/XCUIElementTypeButton[`label BEGINSWITH[c] 'Allow' OR label ==[c] 'OK' OR label CONTAINS[c] 'WLAN' OR label CONTAINS[c] '蜂窝'`]"
 	} else if d.alertAction == "dismiss" {
 		sessionSettings["dismissAlertButtonSelector"] = "**/XCUIElementTypeButton[`label CONTAINS[c] 'Don't Allow' OR label CONTAINS[c] 'Dont Allow'`]"
 	}
