@@ -1202,7 +1202,23 @@ func (d *Driver) launchApp(step *flow.LaunchAppStep) *core.CommandResult {
 		// 恰好点到 Don't Allow，导致网络被封。追加 WLAN/蜂窝 匹配后，
 		// 该弹窗会命中首匹配 "WLAN & Cellular"（放行）；对 2 键权限弹窗
 		// （相机/麦克风等）selector 不匹配，行为不变（fallback lastObject=Allow）。
-		sessionSettings["acceptAlertButtonSelector"] = "**/XCUIElementTypeButton[`label BEGINSWITH[c] 'Allow' OR label ==[c] 'OK' OR label CONTAINS[c] 'WLAN' OR label CONTAINS[c] '蜂窝'`]"
+		//
+		// 中文系统（简/繁）的定位/相机/麦克风/相册权限弹窗按钮不匹配英文
+		// Allow/OK，会走 fallback；iOS 18+ 对 sheet 取 firstObject，可能点到
+		// 非关闭控件（如「精确位置」开关），导致弹窗一直停留并阻塞后续用例。
+		// 这里补上常见中文按钮的**精确匹配**；不能用 CONTAINS '允许'，
+		// 否则会误命中「不允许」。
+		sessionSettings["acceptAlertButtonSelector"] = "**/XCUIElementTypeButton[`" +
+			"label BEGINSWITH[c] 'Allow' OR label ==[c] 'OK' " +
+			"OR label CONTAINS[c] 'WLAN' OR label CONTAINS[c] '蜂窝' " +
+			"OR label ==[c] '允许' OR label ==[c] '允许一次' " +
+			"OR label ==[c] '使用App时允许' OR label ==[c] '使用 App 时允许' " +
+			"OR label ==[c] '使用期间允许' OR label ==[c] '好' " +
+			"OR label ==[c] '允许访问所有照片' OR label ==[c] '允许完全访问' " +
+			"OR label ==[c] '允許' OR label ==[c] '允許一次' " +
+			"OR label ==[c] '使用App時允許' OR label ==[c] '使用 App 時允許' " +
+			"OR label ==[c] '使用期間允許' OR label ==[c] '允許訪問所有照片' " +
+			"OR label ==[c] '允許完全訪問'`]"
 	} else if d.alertAction == "dismiss" {
 		sessionSettings["dismissAlertButtonSelector"] = "**/XCUIElementTypeButton[`label CONTAINS[c] 'Don't Allow' OR label CONTAINS[c] 'Dont Allow'`]"
 	}
